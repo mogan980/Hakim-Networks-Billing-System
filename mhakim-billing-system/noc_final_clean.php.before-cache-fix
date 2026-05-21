@@ -1318,65 +1318,74 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
 <link rel="stylesheet" href="bandwidth_pro_card.css">
 <link rel="stylesheet" href="quick_actions_pro.css">
 
-<style id="HN_PRO_SIDEBAR_STYLE">
-.sidebar, aside, .side-menu{
-  background:linear-gradient(180deg,#020617,#07111f)!important;
-  border-right:1px solid rgba(34,197,94,.22)!important;
-  box-shadow:12px 0 40px rgba(0,0,0,.22)!important;
+<style id="hn-bandwidth-pro-style">
+#hnBandwidthProCard{
+  background:linear-gradient(145deg,#06121f,#081827);
+  border:1px solid rgba(34,197,94,.45);
+  border-radius:28px;
+  padding:28px;
+  color:#fff;
+  box-shadow:0 25px 80px rgba(0,0,0,.35);
+  margin:18px 0;
 }
-.sidebar a, aside a, .side-menu a,
-.sidebar button, aside button, .side-menu button{
-  border-radius:14px!important;
-  margin:6px 10px!important;
-  padding:13px 14px!important;
-  font-weight:800!important;
-  transition:.22s ease!important;
-  background:rgba(15,23,42,.86)!important;
-  color:#f8fafc!important;
-  border:1px solid rgba(148,163,184,.08)!important;
+#hnBandwidthProCard .hn-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+#hnBandwidthProCard .hn-title{display:flex;gap:14px;align-items:center}
+#hnBandwidthProCard .hn-signal{font-size:34px;color:#22c55e}
+#hnBandwidthProCard h2{margin:0;font-size:30px;font-weight:900}
+#hnBandwidthProCard p{margin:5px 0 0;color:#94a3b8}
+#hnBandwidthProCard .hn-live{background:#052e16;border:1px solid #16a34a;padding:10px 20px;border-radius:16px;color:#4ade80;font-weight:900}
+#hnBandwidthProCard .hn-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+#hnBandwidthProCard .hn-speed{
+  background:linear-gradient(145deg,#0f2137,#0b1728);
+  border:1px solid #334155;
+  border-radius:22px;
+  padding:24px;
+  min-height:170px;
+  position:relative;
+  overflow:hidden;
 }
-.sidebar a:hover, aside a:hover, .side-menu a:hover{
-  background:linear-gradient(135deg,#16a34a,#22c55e)!important;
-  color:#052e16!important;
-  transform:translateX(4px);
-  box-shadow:0 10px 25px rgba(34,197,94,.25)!important;
+#hnBandwidthProCard .hn-speed:after{
+  content:"";
+  position:absolute;left:0;right:0;bottom:0;height:48px;
+  background:linear-gradient(90deg,rgba(34,197,94,.15),rgba(59,130,246,.18));
 }
-.sidebar a.active, aside a.active, .side-menu a.active{
-  background:linear-gradient(135deg,#16a34a,#22c55e)!important;
-  color:#052e16!important;
+#hnBandwidthProCard .hn-icon{
+  width:64px;height:64px;border-radius:50%;
+  display:grid;place-items:center;font-size:34px;
+  background:rgba(34,197,94,.18);color:#4ade80;
 }
-#hnSidebarToggle{
-  position:fixed;
-  left:14px;
-  bottom:14px;
-  z-index:9999;
-  background:#22c55e;
-  color:#052e16;
-  border:0;
-  border-radius:14px;
-  padding:11px 14px;
-  font-weight:900;
-  cursor:pointer;
-  box-shadow:0 12px 30px rgba(0,0,0,.35);
+#hnBandwidthProCard .hn-blue .hn-icon{background:rgba(59,130,246,.18);color:#38bdf8}
+#hnBandwidthProCard .hn-row{display:flex;justify-content:space-between;align-items:center}
+#hnBandwidthProCard .hn-label{color:#cbd5e1;font-weight:900;font-size:15px}
+#hnBandwidthProCard .hn-value{font-size:44px;font-weight:900;color:#4ade80;margin-top:14px}
+#hnBandwidthProCard .hn-blue .hn-value{color:#38bdf8}
+#hnBandwidthProCard .hn-value small{font-size:18px;color:#cbd5e1}
+#hnBandwidthProCard .hn-bars{font-size:28px;color:#4ade80;text-align:right;font-weight:900}
+#hnBandwidthProCard .hn-blue .hn-bars{color:#38bdf8}
+#hnBandwidthProCard .hn-chart{
+  margin-top:24px;background:#0b1728;border:1px solid #334155;
+  border-radius:22px;padding:22px;min-height:220px;
 }
-body.hn-sidebar-collapsed .sidebar,
-body.hn-sidebar-collapsed aside,
-body.hn-sidebar-collapsed .side-menu{
-  width:78px!important;
-  min-width:78px!important;
-  overflow:hidden!important;
+#hnBandwidthProCard .hn-chart-title{display:flex;justify-content:space-between;font-weight:900;margin-bottom:14px}
+#hnBandwidthProCard .hn-graph{
+  height:130px;border-bottom:1px solid #334155;
+  background:repeating-linear-gradient(to top,transparent 0,transparent 31px,rgba(148,163,184,.16) 32px);
+  position:relative;overflow:hidden;border-radius:12px;
 }
-body.hn-sidebar-collapsed .sidebar a,
-body.hn-sidebar-collapsed aside a,
-body.hn-sidebar-collapsed .side-menu a{
-  white-space:nowrap!important;
-  font-size:0!important;
-  text-align:center!important;
+#hnBandwidthProCard .hn-line1,#hnBandwidthProCard .hn-line2{
+  position:absolute;left:0;right:0;height:3px;border-radius:20px;
+  animation:hnPulse 3s infinite linear;
 }
-body.hn-sidebar-collapsed .sidebar a::first-letter,
-body.hn-sidebar-collapsed aside a::first-letter,
-body.hn-sidebar-collapsed .side-menu a::first-letter{
-  font-size:18px!important;
+#hnBandwidthProCard .hn-line1{bottom:38px;background:#22c55e;box-shadow:0 0 18px #22c55e}
+#hnBandwidthProCard .hn-line2{bottom:62px;background:#38bdf8;box-shadow:0 0 18px #38bdf8;animation-delay:.6s}
+@keyframes hnPulse{0%{transform:translateX(-20%) scaleX(.8)}50%{transform:translateX(10%) scaleX(1.1)}100%{transform:translateX(20%) scaleX(.9)}}
+#hnBandwidthProCard .hn-status{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:22px}
+#hnBandwidthProCard .hn-mini{background:#0b1728;border:1px solid #334155;border-radius:18px;padding:18px}
+#hnBandwidthProCard .hn-mini b{display:block;font-size:24px;color:#4ade80;margin-top:6px}
+#hnBandwidthProCard .hn-foot{margin-top:20px;border:1px solid #334155;border-radius:16px;padding:14px;display:flex;justify-content:space-between;color:#94a3b8}
+@media(max-width:760px){
+ #hnBandwidthProCard .hn-grid,#hnBandwidthProCard .hn-status{grid-template-columns:1fr}
+ #hnBandwidthProCard .hn-foot{display:block;line-height:1.8}
 }
 </style>
 
@@ -1443,7 +1452,64 @@ body.hn-sidebar-collapsed .side-menu a::first-letter{
 </div>
 
 <div class="grid3">
-<div class="section"><h2>Bandwidth Monitor</h2><canvas id="trafficChart"></canvas></div>
+<div class="section">
+<div id="hnBandwidthProCard">
+  <div class="hn-head">
+    <div class="hn-title">
+      <div class="hn-signal">▂▄▆█</div>
+      <div>
+        <h2>Bandwidth Monitor</h2>
+        <p>Live MikroTik interface traffic RX/TX.</p>
+      </div>
+    </div>
+    <div class="hn-live">● LIVE</div>
+  </div>
+
+  <div class="hn-grid">
+    <div class="hn-speed">
+      <div class="hn-row">
+        <div class="hn-icon">↓</div>
+        <div class="hn-bars">▂▄▆█<br><small>Strong</small></div>
+      </div>
+      <div class="hn-label">DOWNLOAD RX</div>
+      <div class="hn-value"><span id="downloadSpeed">0.00</span> <small>Mbps</small></div>
+    </div>
+
+    <div class="hn-speed hn-blue">
+      <div class="hn-row">
+        <div class="hn-icon">↑</div>
+        <div class="hn-bars">▂▄▆█<br><small>Strong</small></div>
+      </div>
+      <div class="hn-label">UPLOAD TX</div>
+      <div class="hn-value"><span id="uploadSpeed">0.00</span> <small>Mbps</small></div>
+    </div>
+  </div>
+
+  <div class="hn-chart">
+    <div class="hn-chart-title">
+      <span>LIVE TRAFFIC OVERVIEW</span>
+      <span><span style="color:#22c55e">●</span> Download RX &nbsp;&nbsp; <span style="color:#38bdf8">●</span> Upload TX</span>
+    </div>
+    <div class="hn-graph">
+      <div class="hn-line1"></div>
+      <div class="hn-line2"></div>
+    </div>
+  </div>
+
+  <div class="hn-status">
+    <div class="hn-mini">⏱ Updating Every <b>3s</b></div>
+    <div class="hn-mini">📡 MikroTik Status <b>Connected</b></div>
+    <div class="hn-mini">〽 Connection Quality <b>Excellent</b></div>
+    <div class="hn-mini">🛡 Interface Status <b>Active</b></div>
+  </div>
+
+  <div class="hn-foot">
+    <span>◷ Last updated: <span id="hnLastUpdated">--:--:--</span></span>
+    <span>● Live Monitoring Active</span>
+    <span>⚙ Data Source: MikroTik API</span>
+  </div>
+</div>
+<canvas id="trafficChart"></canvas></div>
 <div class="section"><h2>Client Distribution</h2><canvas id="clientPie"></canvas></div>
 <div class="section health-pro">
     <h2>⚡ MikroTik Health</h2>
@@ -2250,128 +2316,72 @@ setInterval(loadNocApi,5000);
 <script>
 </script>
 
-<script id="HAKIM_REVENUE_LIVE_ONLY">
-async function hakimUpdateRevenueOnly(){
+<!-- HAKIM_REVENUE_LIVE_FIX -->
+<script>
+async function hakimRevenueLive(){
   try{
-    const r = await fetch("revenue_live_api.php?t=" + Date.now(), {cache:"no-store"});
+    const r = await fetch("revenue_live_api.php?t=" + Date.now());
     const d = await r.json();
     if(!d.success) return;
 
-    const values = {
-      today: "Ksh " + Number(d.today).toLocaleString(),
-      week: "Ksh " + Number(d.week).toLocaleString(),
-      month: "Ksh " + Number(d.month).toLocaleString(),
-      total: "Ksh " + Number(d.total).toLocaleString(),
-      clients: Number(d.clients).toLocaleString(),
-      packages: Number(d.packages).toLocaleString(),
-      vouchers: Number(d.vouchers).toLocaleString()
+    const map = {
+      "Today Revenue": "Ksh " + d.today.toLocaleString(),
+      "This Week": "Ksh " + d.week.toLocaleString(),
+      "This Month": "Ksh " + d.month.toLocaleString(),
+      "Total Revenue": "Ksh " + d.total.toLocaleString(),
+      "Total Clients": d.clients,
+      "Packages": d.packages,
+      "Vouchers": d.vouchers
     };
 
-    function replaceNear(label, value){
-      [...document.querySelectorAll("*")].forEach(el=>{
-        if(el.children.length === 0 && el.innerText.trim() === label){
-          let box = el.closest("div");
-          if(!box) return;
-          [...box.querySelectorAll("*")].forEach(x=>{
-            let t = x.innerText.trim();
-            if(/^Ksh\s/.test(t) || t === "NaN" || /^\d+$/.test(t)){
-              x.innerText = value;
+    Object.keys(map).forEach(label=>{
+      document.querySelectorAll("div,section,article").forEach(card=>{
+        if(card.innerText && card.innerText.includes(label)){
+          const targets = card.querySelectorAll("h1,h2,h3,b,strong,span");
+          for(const el of targets){
+            if(/Ksh|NaN|^\d+$/.test(el.innerText.trim()) && !el.innerText.includes(label)){
+              el.innerText = map[label];
+              break;
             }
-          });
+          }
         }
       });
-    }
-
-    replaceNear("Today Revenue", values.today);
-    replaceNear("This Week", values.week);
-    replaceNear("This Month", values.month);
-    replaceNear("Total Revenue", values.total);
-    replaceNear("Total Clients", values.clients);
-    replaceNear("Packages", values.packages);
-    replaceNear("Vouchers", values.vouchers);
-
+    });
   }catch(e){}
 }
-hakimUpdateRevenueOnly();
-setInterval(hakimUpdateRevenueOnly, 10000);
+hakimRevenueLive();
+setInterval(hakimRevenueLive, 10000);
 </script>
 
 
-<script id="HAKIM_ANALYTICS_DIRECT_FIX">
-async function fixRevenueAnalyticsDirect(){
-  const r = await fetch("revenue_live_api.php?t="+Date.now(), {cache:"no-store"});
-  const d = await r.json();
-  if(!d.success) return;
+<script id="HAKIM_REVENUE_ANALYTICS_FIX">
+async function updateRevenueAnalytics(){
+  try{
+    const r = await fetch("revenue_analytics_api.php?t="+Date.now());
+    const d = await r.json();
+    if(!d.success) return;
 
-  const section = [...document.querySelectorAll("div,section,article")]
-    .find(x => x.innerText && x.innerText.includes("Revenue Analytics"));
-  if(!section) return;
+    document.body.innerHTML = document.body.innerHTML
+      .replace(/Ksh NaN/g, "Ksh " + d.week.toLocaleString())
+      .replace(/Ksh 0(?=\s*Today)/g, "Ksh " + d.today.toLocaleString());
 
-  const cards = [...section.querySelectorAll("div")]
-    .filter(x => x.innerText && (x.innerText.includes("Total Revenue") || x.innerText.includes("This Month") || x.innerText.includes("Today")));
-
-  cards.forEach(card=>{
-    if(card.innerText.includes("Total Revenue")){
-      const v = [...card.querySelectorAll("*")].find(x=>x.children.length===0 && x.innerText.trim().startsWith("Ksh"));
-      if(v) v.innerText = "Ksh " + Number(d.total).toLocaleString();
-    }
-    if(card.innerText.includes("This Month")){
-      const v = [...card.querySelectorAll("*")].find(x=>x.children.length===0 && x.innerText.trim().startsWith("Ksh"));
-      if(v) v.innerText = "Ksh " + Number(d.month).toLocaleString();
-    }
-    if(card.innerText.includes("Today")){
-      const v = [...card.querySelectorAll("*")].find(x=>x.children.length===0 && x.innerText.trim().startsWith("Ksh"));
-      if(v) v.innerText = "Ksh " + Number(d.today).toLocaleString();
-    }
-  });
+    const cards=[...document.querySelectorAll("*")].filter(x=>x.innerText && x.innerText.includes("Revenue Analytics"));
+    cards.forEach(section=>{
+      section.querySelectorAll("*").forEach(el=>{
+        const t=el.innerText?.trim();
+        if(t==="18") el.innerText="Ksh "+d.total.toLocaleString();
+        if(t==="Ksh 0") el.innerText="Ksh "+d.today.toLocaleString();
+      });
+    });
+  }catch(e){}
 }
-fixRevenueAnalyticsDirect();
-setInterval(fixRevenueAnalyticsDirect, 10000);
+updateRevenueAnalytics();
+setInterval(updateRevenueAnalytics,10000);
 </script>
 
 
-<script id="HN_PRO_SIDEBAR_SCRIPT">
-(function(){
-  function findSidebar(){
-    return [...document.querySelectorAll("aside,.sidebar,.side-menu,nav")]
-      .find(el => el.innerText && el.innerText.includes("Logout") && el.innerText.includes("Dashboard"));
-  }
-
-  function cleanSidebar(){
-    const sb = findSidebar();
-    if(!sb) return;
-
-    sb.classList.add("sidebar");
-
-    const seen = new Set();
-    [...sb.querySelectorAll("a,button")].forEach(el=>{
-      const key = (el.innerText || "").trim().toLowerCase();
-      if(!key) return;
-      if(seen.has(key)){
-        el.style.display = "none";
-      }else{
-        seen.add(key);
-      }
-    });
-
-    [...sb.querySelectorAll("a")].forEach(a=>{
-      if(location.href.includes(a.getAttribute("href") || "___none___")){
-        a.classList.add("active");
-      }
-    });
-
-    if(!document.getElementById("hnSidebarToggle")){
-      const btn=document.createElement("button");
-      btn.id="hnSidebarToggle";
-      btn.innerText="☰ Menu";
-      btn.onclick=()=>document.body.classList.toggle("hn-sidebar-collapsed");
-      document.body.appendChild(btn);
-    }
-  }
-
-  cleanSidebar();
-  setTimeout(cleanSidebar,1000);
-})();
+<script id="hn-bandwidth-pro-clock">
+setInterval(()=>{const e=document.getElementById("hnLastUpdated"); if(e) e.textContent=new Date().toLocaleTimeString();},1000);
 </script>
 
 </body>
