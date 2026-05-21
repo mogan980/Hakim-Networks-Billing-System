@@ -114,7 +114,35 @@ if (!$result["success"]) {
         SET status='used', used_by=?, used_at=NOW(), expires_at=? 
         WHERE id=?
     ");
-    $update->execute([
+    
+/* PHASE2_VOUCHER_PAYMENT_RECORD */
+try {
+    $amount = $voucher["amount"] ?? $voucher["price"] ?? 0;
+    if (!$amount && isset($voucher["package_id"])) {
+        $pkgStmt = $pdo->prepare("SELECT price FROM packages WHERE id=? LIMIT 1");
+        $pkgStmt->execute([$voucher["package_id"]]);
+        $amount = $pkgStmt->fetchColumn() ?: 0;
+    }
+
+    $payStmt = $pdo->prepare("
+        INSERT INTO payments
+        (package_id, amount, method, reference, status, checkout_id, phone, client_ip, created_at)
+        VALUES (?, ?, 'voucher', ?, 'paid', ?, ?, ?, NOW())
+    ");
+
+    $payStmt->execute([
+        $voucher["package_id"] ?? null,
+        $amount,
+        $code,
+        "VOUCHER-" . $code,
+        $code,
+        $clientIp
+    ]);
+} catch(Exception $e) {
+    file_put_contents(__DIR__ . "/smart_voucher_debug.log", "[" . date("Y-m-d H:i:s") . "] PAYMENT RECORD ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
+}
+
+$update->execute([
         $clientIp,
         $expires,
         $voucher["id"]
