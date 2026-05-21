@@ -1,0 +1,217 @@
+<?php
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+$packages = $pdo->query("
+    SELECT * FROM packages 
+    WHERE status='active' 
+    ORDER BY price ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>M.Hakim Internet Packages</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        *{box-sizing:border-box}
+        body{
+            margin:0;
+            font-family:Arial,sans-serif;
+            background:linear-gradient(135deg,#020617,#0f172a,#064e3b);
+            min-height:100vh;
+            color:#0f172a;
+        }
+        .container{max-width:1180px;margin:auto;padding:32px 18px 44px}
+        .hero{
+            color:white;
+            text-align:center;
+            margin-bottom:26px;
+        }
+        .hero h1{margin:0;font-size:44px}
+        .hero p{color:#d1fae5;font-size:15px}
+
+        .top-grid{
+            display:grid;
+            grid-template-columns:1.4fr .8fr;
+            gap:18px;
+            margin-bottom:24px;
+            align-items:stretch;
+        }
+        .info-card{
+            background:white;
+            border-radius:24px;
+            padding:24px;
+            box-shadow:0 18px 40px rgba(0,0,0,.22);
+        }
+        .info-card h2{margin:0 0 16px;color:#16a34a;font-size:22px}
+        .steps{
+            display:grid;
+            grid-template-columns:repeat(3,1fr);
+            gap:12px;
+        }
+        .step{
+            background:#f8fafc;
+            border:1px solid #e2e8f0;
+            border-radius:16px;
+            padding:15px;
+        }
+        .step strong{display:block;margin-bottom:7px}
+        .step span{color:#64748b;font-size:13px;line-height:1.45}
+
+        .support-links{display:grid;gap:10px}
+        .support-links a{
+            background:#f8fafc;
+            border:1px solid #e2e8f0;
+            color:#0f172a;
+            text-decoration:none;
+            padding:13px 14px;
+            border-radius:14px;
+            font-weight:bold;
+            font-size:14px;
+        }
+
+        .packages{
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(245px,1fr));
+            gap:20px;
+        }
+        .package{
+            background:white;
+            border-radius:24px;
+            padding:22px;
+            min-height:280px;
+            display:flex;
+            flex-direction:column;
+            justify-content:space-between;
+            box-shadow:0 18px 40px rgba(0,0,0,.24);
+        }
+        .package h2{margin:0;color:#16a34a;font-size:23px}
+        .price{font-size:33px;font-weight:900;margin:14px 0;color:#020617}
+        .speed{
+            background:#f8fafc;
+            padding:12px;
+            border-radius:14px;
+            color:#334155;
+            margin-bottom:14px;
+            font-weight:bold;
+            font-size:14px;
+        }
+        input{
+            width:100%;
+            padding:14px;
+            border:1px solid #cbd5e1;
+            border-radius:13px;
+            margin-bottom:12px;
+            font-size:14px;
+        }
+        button{
+            width:100%;
+            padding:14px;
+            border:0;
+            border-radius:13px;
+            background:#16a34a;
+            color:white;
+            font-weight:bold;
+            cursor:pointer;
+        }
+        .voucher-box{
+            margin:28px auto 0;
+            background:white;
+            padding:24px;
+            border-radius:24px;
+            box-shadow:0 18px 40px rgba(0,0,0,.24);
+            max-width:680px;
+        }
+        .voucher-box h2{margin:0 0 8px;color:#16a34a}
+        .voucher-box p{color:#64748b;margin-top:0}
+        .footer{
+            color:#cbd5e1;
+            text-align:center;
+            margin-top:26px;
+            font-size:13px;
+        }
+
+        @media(max-width:850px){
+            .hero h1{font-size:34px}
+            .top-grid,.steps,.packages{grid-template-columns:1fr}
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <div class="hero">
+        <h1>M.Hakim Internet</h1>
+        <p>Fast, affordable and secure hotspot internet. Choose a package and connect instantly.</p>
+    </div>
+
+    <div class="top-grid">
+        <div class="info-card">
+            <h2>How to Connect / Reconnect</h2>
+            <div class="steps">
+                <div class="step">
+                    <strong>1. Choose Package</strong>
+                    <span>Select your preferred package based on time, price and speed.</span>
+                </div>
+                <div class="step">
+                    <strong>2. Enter Phone</strong>
+                    <span>Enter your M-Pesa number. Your phone number becomes your hotspot username.</span>
+                </div>
+                <div class="step">
+                    <strong>3. Get Connected</strong>
+                    <span>After activation, reconnect anytime before expiry using the same phone number.</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h2>Customer Support</h2>
+            <div class="support-links">
+                <a href="tel:+254704467699">Call: 0704467699</a>
+                <a href="sms:+254704467699">SMS Support</a>
+                <a href="https://wa.me/254704467699" target="_blank">WhatsApp Support</a>
+                <a href="mailto:moganhakim3@gmail.com">Email: moganhakim3@gmail.com</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="packages">
+        <?php foreach($packages as $package): ?>
+            <div class="package">
+                <div>
+                    <h2><?php echo htmlspecialchars($package["name"]); ?></h2>
+                    <div class="price">Ksh <?php echo number_format($package["price"]); ?></div>
+                    <div class="speed">
+                        <?php echo htmlspecialchars($package["speed_down"]); ?> Down /
+                        <?php echo htmlspecialchars($package["speed_up"]); ?> Up
+                    </div>
+                </div>
+
+                <form method="POST" action="stk_push.php">
+                    <input type="hidden" name="package_id" value="<?php echo htmlspecialchars($package["id"]); ?>">
+                    <input type="text" name="phone" placeholder="Enter M-Pesa number e.g. 0704467699" required>
+                    <button type="submit">Buy Internet</button>
+                </form>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
+    <div class="voucher-box">
+        <h2>Redeem Voucher</h2>
+        <p>Enter your voucher code to activate internet instantly.</p>
+        <form method="POST" action="redeem_voucher.php">
+            <input type="text" name="voucher_code" placeholder="Enter voucher code" required>
+            <button type="submit">Activate Voucher</button>
+        </form>
+    </div>
+
+    <div class="footer">
+        Powered by M.Hakim Billing System • Support: 0704467699 • moganhakim3@gmail.com
+    </div>
+
+</div>
+
+</body>
+</html>

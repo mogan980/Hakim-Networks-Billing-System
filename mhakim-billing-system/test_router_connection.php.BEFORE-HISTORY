@@ -1,0 +1,63 @@
+<?php
+header("Content-Type: application/json");
+
+require_once "auth.php";
+requireLogin();
+require_once "config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$routerIp = trim($_POST["router_ip"] ?? "");
+$username = trim($_POST["username"] ?? "");
+$password = trim($_POST["password"] ?? "");
+$apiPort  = (int)($_POST["api_port"] ?? 8728);
+
+if (!$routerIp || !$username || !$password) {
+    echo json_encode([
+        "success" => false,
+        "message" => "Router IP, username, and password are required."
+    ]);
+    exit;
+}
+
+try {
+    $client = new Client(new Config([
+        "host" => $routerIp,
+        "user" => $username,
+        "pass" => $password,
+        "port" => $apiPort,
+        "timeout" => 6
+    ]));
+
+    $identity = $client->query(new Query("/system/identity/print"))->read();
+
+    $routerName = $identity[0]["name"] ?? "MikroTik Router";
+
+    $stmt = $pdo->prepare("
+        INSERT INTO mikrotik_settings
+        (router_ip, router_username, router_password, api_port, created_at)
+        VALUES (?, ?, ?, ?, NOW())
+    ");
+
+    $stmt->execute([
+        $routerIp,
+        $username,
+        $password,
+        $apiPort
+    ]);
+
+    echo json_encode([
+        "success" => true,
+        "message" => "Connected successfully to " . $routerName,
+        "router_name" => $routerName
+    ]);
+
+} catch (Exception $e) {
+    echo json_encode([
+        "success" => false,
+        "message" => "Connection failed: " . $e->getMessage()
+    ]);
+}

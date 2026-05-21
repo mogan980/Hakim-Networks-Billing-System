@@ -1,0 +1,79 @@
+<?php
+$checkout=$_GET["checkout_id"] ?? "";
+if(!$checkout){header("Location:index.php");exit;}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activating Internet</title>
+<style>
+body{margin:0;font-family:Arial;background:linear-gradient(135deg,#020617,#064e3b);color:white;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{width:90%;max-width:420px;background:#0f172a;border-radius:25px;padding:30px;text-align:center}
+.spinner{width:70px;height:70px;border:9px solid #334155;border-top-color:#22c55e;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{color:#22c55e}
+.status{background:#020617;padding:15px;border-radius:14px;margin-top:15px}
+.btn{display:none;margin-top:15px;background:#22c55e;color:white;border:0;border-radius:14px;padding:14px;font-weight:900;width:100%}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="spinner"></div>
+<h1>Waiting for Payment</h1>
+<p>Enter M-Pesa PIN on your phone.</p>
+<div class="status" id="status">Checking...</div>
+<button class="btn" id="btn" onclick="login()">Connect Internet</button>
+</div>
+
+<form id="f" method="post" action="http://192.168.88.1/login" style="display:none">
+<input type="hidden" name="username" id="u">
+<input type="hidden" name="password" id="p">
+<input type="hidden" name="dst" id="dst" value="http://neverssl.com/">
+</form>
+
+<script>
+let ready=false, tries=0;
+function login(){if(ready)document.getElementById("f").submit();}
+async function check(){
+ tries++;
+ try{
+  let r=await fetch("check_payment.php?checkout_id=<?php echo urlencode($checkout); ?>&t="+Date.now(),{cache:"no-store"});
+  let d=await r.json();
+
+  if(d.status==="paid"){
+    status.innerHTML="✅ Payment confirmed. Connecting...";
+    u.value=d.username;
+    p.value=d.password;
+    if(d.login_url)f.action=d.login_url;
+    if(d.dst)dst.value=d.dst;
+    ready=true;
+    btn.style.display="block";
+    setTimeout(login,1200);
+    return;
+  }
+
+  if(d.status==="failed"){
+    status.innerHTML="❌ Payment failed";
+    setTimeout(()=>location.href="index.php",2000);
+    return;
+  }
+
+  if(d.status==="error"){
+    status.innerHTML="Activation error: "+d.message;
+    setTimeout(check,3000);
+    return;
+  }
+
+  status.innerHTML="Waiting confirmation... "+tries;
+  setTimeout(check,2500);
+
+ }catch(e){
+  status.innerHTML="Connection issue. Retrying... "+tries;
+  setTimeout(check,2500);
+ }
+}
+check();
+</script>
+</body>
+</html>

@@ -1,0 +1,729 @@
+<?php
+session_start();
+require_once "config/database.php";
+require "vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+if (!isset($_SESSION["user_id"])) {
+    header("Location: login.php");
+    exit;
+}
+
+$totalClients = $pdo->query("SELECT COUNT(*) FROM clients")->fetchColumn();
+$activeClients = $pdo->query("SELECT COUNT(*) FROM clients WHERE status='active'")->fetchColumn();
+$expiredClients = $pdo->query("SELECT COUNT(*) FROM clients WHERE status='expired'")->fetchColumn();
+$blockedClients = $pdo->query("SELECT COUNT(*) FROM clients WHERE status='blocked'")->fetchColumn();
+
+$totalPayments = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'")->fetchColumn();
+$todayRevenue = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(created_at)=CURDATE()")->fetchColumn();
+$monthlyRevenue = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())")->fetchColumn();
+
+$totalPackages = $pdo->query("SELECT COUNT(*) FROM packages WHERE status='active'")->fetchColumn();
+$totalVouchers = $pdo->query("SELECT COUNT(*) FROM vouchers")->fetchColumn();
+$unusedVouchers = $pdo->query("SELECT COUNT(*) FROM vouchers WHERE status='unused'")->fetchColumn();
+$usedVouchers = $pdo->query("SELECT COUNT(*) FROM vouchers WHERE status='used'")->fetchColumn();
+
+$averageRevenuePerUser = $totalClients > 0 ? $totalPayments / $totalClients : 0;
+$collectionRate = $totalClients > 0 ? round(($activeClients / $totalClients) * 100) : 0;
+
+$mikrotikConnected = false;
+$hotspotUsersCount = 0;
+$onlineUsers = 0;
+$queuesCount = 0;
+$routerName = "Unknown";
+$routerUptime = "Offline";
+$cpuLoad = 0;
+$freeMemory = "-";
+$totalMemory = "-";
+$freeHdd = "-";
+$architecture = "-";
+$boardName = "-";
+$rxBps = 0;
+$txBps = 0;
+$signalQuality = 0;
+$wirelessClients = 0;
+$avgSignal = "N/A";
+$networkStrength = 0;
+
+function formatBits($bps) {
+    $bps = (float)$bps;
+    if ($bps >= 1000000) return round($bps / 1000000, 2) . " Mbps";
+    if ($bps >= 1000) return round($bps / 1000, 2) . " Kbps";
+    return round($bps) . " bps";
+}
+
+try {
+    $settings = $pdo->query("SELECT * FROM mikrotik_settings ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+
+    if ($settings) {
+        $config = new Config([
+            'host' => $settings["router_ip"],
+            'user' => $settings["router_username"],
+            'pass' => $settings["router_password"],
+            'port' => (int)$settings["api_port"],
+        ]);
+
+        $api = new Client($config);
+
+        $identity = $api->query(new Query('/system/identity/print'))->read();
+        $routerName = $identity[0]["name"] ?? "MikroTik";
+
+        $resource = $api->query(new Query('/system/resource/print'))->read();
+        if (!empty($resource)) {
+            $cpuLoad = $resource[0]["cpu-load"] ?? 0;
+            $routerUptime = $resource[0]["uptime"] ?? "-";
+            $freeMemory = $resource[0]["free-memory"] ?? "-";
+            $totalMemory = $resource[0]["total-memory"] ?? "-";
+            $freeHdd = $resource[0]["free-hdd-space"] ?? "-";
+            $architecture = $resource[0]["architecture-name"] ?? "-";
+            $boardName = $resource[0]["board-name"] ?? "-";
+        }
+
+        $hotspotUsersCount = count($api->query(new Query('/ip/hotspot/user/print'))->read());
+        $onlineUsers = count($api->query(new Query('/ip/hotspot/active/print'))->read());
+        $queuesCount = count($api->query(new Query('/queue/simple/print'))->read());
+
+        try {
+            $traffic = $api->query(
+                (new Query('/interface/monitor-traffic'))
+                    ->equal('interface', 'bridge')
+                    ->equal('once', '')
+            )->read();
+
+            if (!empty($traffic)) {
+                $rxBps = $traffic[0]["rx-bits-per-second"] ?? 0;
+                $txBps = $traffic[0]["tx-bits-per-second"] ?? 0;
+            }
+        } catch (Exception $e) {}
+
+        try {
+            $registrations = $api->query(new Query('/interface/wireless/registration-table/print'))->read();
+            $wirelessClients = count($registrations);
+
+            $signals = [];
+            foreach ($registrations as $reg) {
+                if (isset($reg["signal-strength"])) {
+                    preg_match('/-?\d+/', $reg["signal-strength"], $matches);
+                    if (!empty($matches)) $signals[] = (int)$matches[0];
+                }
+            }
+
+            if (count($signals) > 0) {
+                $avg = array_sum($signals) / count($signals);
+                $avgSignal = round($avg) . " dBm";
+                $signalQuality = max(0, min(100, round(($avg + 100) * 2)));
+            }
+        } catch (Exception $e) {}
+
+        $mikrotikConnected = true;
+$networkStrength = 90;
+    }
+} catch (Exception $e) {
+    $mikrotikConnected = false;
+}
+
+$labels = [];
+$values = [];
+
+$paymentsChart = $pdo->query("
+    SELECT DATE(created_at) as day, SUM(amount) as total
+    FROM payments
+    WHERE status='paid'
+    GROUP BY DATE(created_at)
+    ORDER BY DATE(created_at) ASC
+    LIMIT 7
+")->fetchAll(PDO::FETCH_ASSOC);
+
+foreach($paymentsChart as $row){
+    $labels[] = $row["day"];
+    $values[] = $row["total"];
+}
+
+$packageLabels = [];
+$packageValues = [];
+
+$packageChart = $pdo->query("
+    SELECT packages.name, COUNT(clients.id) AS total_clients
+    FROM packages
+    LEFT JOIN clients ON clients.package_id = packages.id
+    GROUP BY packages.id
+    ORDER BY total_clients DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+foreach($packageChart as $row){
+    $packageLabels[] = $row["name"];
+    $packageValues[] = $row["total_clients"];
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>M.Hakim ISP Dashboard</title>
+    <meta http-equiv="refresh" content="30">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        *{box-sizing:border-box}
+        body{margin:0;font-family:Arial,sans-serif;background:#eef3f8;color:#0f172a;overflow-x:hidden}
+        .sidebar{width:245px;height:100vh;position:fixed;left:0;top:0;background:linear-gradient(180deg,#020617,#0f172a);color:white;padding:20px 14px;z-index:10;box-shadow:8px 0 30px rgba(2,6,23,.25)}
+        .brand{background:rgba(255,255,255,.05);padding:16px;border-radius:18px;margin-bottom:20px}
+        .brand h2{margin:0;color:#22c55e;font-size:24px}
+        .brand p{color:#94a3b8;font-size:12px;margin:6px 0 0}
+        .nav-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin:18px 10px 8px}
+        .sidebar a{display:block;color:#e5e7eb;text-decoration:none;padding:12px 13px;border-radius:12px;margin:6px 0;transition:.25s;font-size:14px}
+        .sidebar a:hover,.sidebar .active{background:#1e293b;transform:translateX(4px)}
+        .support-box{margin-top:18px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);padding:13px;border-radius:16px}
+        .support-box h4{margin:0 0 8px;color:#22c55e;font-size:14px}
+        .support-box a{padding:8px 10px;margin:5px 0;background:rgba(255,255,255,.06);font-size:12px}
+        .main{margin-left:245px;padding:22px;max-width:calc(100vw - 245px)}
+        .hero{background:linear-gradient(135deg,#0f172a,#166534);color:white;padding:22px 24px;border-radius:22px;box-shadow:0 18px 35px rgba(15,23,42,.18);margin-bottom:18px}
+        .hero h1{margin:0;font-size:28px}
+        .hero p{color:#d1fae5;margin-bottom:0;font-size:14px}
+        .pulse{width:12px;height:12px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:8px;animation:pulse 1.5s infinite}
+        .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+        .two-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;margin-bottom:18px;align-items:start}
+        .three-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:18px}
+        .card{background:white;border-radius:20px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.07)}
+        .card h2{margin:0 0 14px;font-size:20px}
+        .card h3{margin:0;color:#64748b;font-size:12px}
+        .number{margin-top:9px;font-size:25px;font-weight:900}
+        .green{color:#16a34a}.red{color:#dc2626}.orange{color:#f97316}.blue{color:#2563eb}
+        .status-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #e5e7eb;font-size:13px}
+        .status-row:last-child{border-bottom:none}
+        .badge{padding:5px 9px;border-radius:20px;font-size:11px;font-weight:bold;white-space:nowrap}
+        .badge-green{background:#dcfce7;color:#166534}
+        .badge-red{background:#fee2e2;color:#991b1b}
+        .badge-orange{background:#ffedd5;color:#9a3412}
+        .badge-blue{background:#dbeafe;color:#1d4ed8}
+        .quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+        .quick-btn{display:block;background:#16a34a;color:white!important;padding:11px;border-radius:12px;text-align:center;text-decoration:none!important;font-weight:bold;font-size:12px}
+        .quick-btn:hover{background:#15803d}
+        .performance{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+        .perf-box{background:#f8fafc;border-radius:14px;padding:13px}
+        .perf-box span{display:block;color:#64748b;font-size:11px;font-weight:bold}
+        .perf-box strong{display:block;margin-top:7px;font-size:21px}
+        .meter{margin-bottom:13px}
+        .meter-top{display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:#334155;margin-bottom:7px}
+        .bar{height:9px;background:#e5e7eb;border-radius:999px;overflow:hidden}
+        .bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#22c55e,#16a34a)}
+        .insight{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-bottom:10px;font-size:13px}
+        canvas{max-width:100%;height:auto!important}
+        .chart-small{max-height:240px}
+        @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.7)}70%{box-shadow:0 0 0 12px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+        @media(max-width:1100px){.grid,.two-grid,.three-grid,.performance{grid-template-columns:1fr}.main{margin-left:0;max-width:100%;padding:18px}.sidebar{position:relative;width:100%;height:auto}.quick-actions{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="brand">
+        <h2>M.Hakim</h2>
+        <p>Advanced ISP Billing System</p>
+    </div>
+
+    <div class="nav-label">Main Menu</div>
+    <a class="active" href="/mhakim-billing-system/noc_final_clean.php">Dashboard</a>
+    <a href="/mhakim-billing-system/clients.php">Clients</a>
+    <a href="/mhakim-billing-system/packages.php">Packages</a>
+    <a href="/mhakim-billing-system/vouchers.php">Vouchers</a>
+    <a href="/mhakim-billing-system/payments.php">Payments</a>
+    <a href="/mhakim-billing-system/mikrotik.php">MikroTik</a>
+    <a href="/mhakim-billing-system/reports.php">Reports</a>
+
+    <div class="support-box">
+        <h4>Customer Support</h4>
+        <a href="https://wa.me/254704467699" target="_blank">WhatsApp: 0704467699</a>
+        <a href="tel:+254704467699">Call Support</a>
+        <a href="sms:+254704467699">Send SMS</a>
+        <a href="mailto:moganhakim3@gmail.com">Email Support</a>
+<div class="support-card">
+    <button class="support-toggle" onclick="toggleSupport()">
+        <span>Customer Support</span>
+        <span id="supportArrow">▼</span>
+    </button>
+
+    <div class="support-dropdown" id="supportDropdown">
+
+        <a href="https://wa.me/254704467699" target="_blank">
+            WhatsApp Support
+        </a>
+
+        <a href="tel:+254704467699">
+            Call Support
+        </a>
+
+        <a href="sms:+254704467699">
+            SMS Support
+        </a>
+
+        <a href="mailto:support@hakimnetworks.co.ke">
+            Email Support
+        </a>
+
+    </div>
+</div>
+    </div>
+
+    <a href="#" class="logout-btn" onclick="confirmLogout(event)">
+    <span>⏻</span>
+    <span>Logout</span>
+</a>
+<div class="settings-card">
+    <button class="settings-toggle" onclick="toggleSettings()">
+        <span>⚙ Settings</span>
+        <span id="settingsArrow">▼</span>
+    </button>
+
+    <div class="settings-dropdown" id="settingsDropdown">
+        <label>Company Logo</label>
+        <input type="file" id="logoInput" accept="image/*">
+
+        <div class="logo-preview-box">
+            <img id="companyLogoPreview" src="" alt="Company Logo">
+        </div>
+
+        <label>Theme Mode</label>
+        <select id="themeSelect" onchange="changeTheme(this.value)">
+            <option value="dark">Dark Mode</option>
+            <option value="light">Light Mode</option>
+            <option value="system">System Mode</option>
+        </select>
+    </div>
+</div>
+<div class="logout-modal" id="logoutModal">
+    <div class="logout-box">
+        <h3>Confirm Logout</h3>
+        <p>Are you sure you want to logout?</p>
+
+        <div class="logout-actions">
+            <button onclick="closeLogout()">Cancel</button>
+            <a href="/mhakim-billing-system/logout.php">Yes, Logout</a>
+        </div>
+    </div>
+</div>
+</div>
+
+<div class="main">
+
+    <div class="hero">
+        <h1><span class="pulse"></span>M.Hakim ISP Command Center</h1>
+        <p>Auto-syncs every 30 seconds: MikroTik health, bandwidth, hotspot users, billing, vouchers, support and expiry engine.</p>
+    </div>
+
+    <div class="grid">
+        <div class="card"><h3>Active Clients</h3><div class="number green"><?php echo $activeClients; ?></div></div>
+        <div class="card"><h3>Expired Clients</h3><div class="number red"><?php echo $expiredClients; ?></div></div>
+        <div class="card"><h3>Today Revenue</h3><div class="number green">Ksh <?php echo number_format($todayRevenue); ?></div></div>
+        <div class="card"><h3>Total Revenue</h3><div class="number blue">Ksh <?php echo number_format($totalPayments); ?></div></div>
+    </div>
+
+    <div class="three-grid">
+        <div class="card">
+            <h2>Network Health</h2>
+            <div class="meter"><div class="meter-top"><span>Network Strength</span><strong><?php echo $networkStrength; ?>%</strong></div><div class="bar"><span style="width:<?php echo $networkStrength; ?>%"></span></div></div>
+            <div class="meter"><div class="meter-top"><span>Wireless Signal Quality</span><strong><?php echo $signalQuality; ?>%</strong></div><div class="bar"><span style="width:<?php echo $signalQuality; ?>%"></span></div></div>
+            <div class="status-row"><span>Avg Signal</span><span class="badge badge-blue"><?php echo $avgSignal; ?></span></div>
+            <div class="status-row"><span>Wireless Clients</span><span class="badge badge-green"><?php echo $wirelessClients; ?></span></div>
+        </div>
+
+        <div class="card">
+            <h2>Bandwidth Monitor</h2>
+            <div class="status-row"><span>Download RX</span><span class="badge badge-green"><?php echo formatBits($rxBps); ?></span></div>
+            <div class="status-row"><span>Upload TX</span><span class="badge badge-blue"><?php echo formatBits($txBps); ?></span></div>
+            <div class="status-row"><span>Simple Queues</span><span class="badge badge-blue"><?php echo $queuesCount; ?></span></div>
+            <div class="insight">
+    Bandwidth control is active. Package speeds are synced to MikroTik queues automatically after payment or voucher activation.
+</div>
+        </div>
+
+        <div class="card">
+            <h2>MikroTik Health</h2>
+            <div class="status-row"><span>CPU Load</span><span class="badge <?php echo $cpuLoad > 70 ? 'badge-red' : 'badge-green'; ?>"><?php echo $cpuLoad; ?>%</span></div>
+            <div class="status-row"><span>Uptime</span><span class="badge badge-blue"><?php echo htmlspecialchars($routerUptime); ?></span></div>
+            <div class="status-row"><span>Memory</span><span class="badge badge-green"><?php echo htmlspecialchars($freeMemory); ?> free</span></div>
+            <div class="status-row"><span>Storage</span><span class="badge badge-blue"><?php echo htmlspecialchars($freeHdd); ?> free</span></div>
+            <div class="status-row"><span>Board</span><span class="badge badge-orange"><?php echo htmlspecialchars($boardName); ?></span></div>
+        </div>
+    </div>
+
+    <div class="two-grid">
+        <div class="card">
+            <h2>ISP Operations Center</h2>
+            <div class="status-row"><span>Hotspot Gateway</span><?php echo $mikrotikConnected ? '<span class="badge badge-green">Online</span>' : '<span class="badge badge-red">Offline</span>'; ?></div>
+            <div class="status-row"><span>M-Pesa Gateway</span><span class="badge badge-orange">Sandbox</span></div>
+            <div class="status-row"><span>MikroTik API</span><?php echo $mikrotikConnected ? '<span class="badge badge-green">Connected</span>' : '<span class="badge badge-orange">Pending Setup</span>'; ?></div>
+            <div class="status-row"><span>Auto Expiry Engine</span><span class="badge badge-green">Ready</span></div>
+            <div class="status-row"><span>Synced Hotspot Users</span><span class="badge badge-blue"><?php echo $hotspotUsersCount; ?></span></div>
+            <div class="status-row"><span>Online Hotspot Users</span><span class="badge badge-green"><?php echo $onlineUsers; ?></span></div>
+            <div class="status-row"><span>Router Identity</span><span class="badge badge-green"><?php echo htmlspecialchars($routerName); ?></span></div>
+        </div>
+
+        <div class="card">
+            <h2>Quick Actions</h2>
+            <div class="quick-actions">
+                <a class="quick-btn" href="/mhakim-billing-system/add_client.php">+ Add Client</a>
+                <a class="quick-btn" href="/mhakim-billing-system/packages.php">Packages</a>
+                <a class="quick-btn" href="/mhakim-billing-system/vouchers.php">Vouchers</a>
+                <a class="quick-btn" href="/mhakim-billing-system/payments.php">Payments</a>
+                <a class="quick-btn" href="/mhakim-billing-system/mikrotik.php">MikroTik</a>
+                <a class="quick-btn" href="/mhakim-billing-system/reports.php">Reports</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="two-grid">
+        <div class="card"><h2>Revenue Analytics</h2><canvas id="revenueChart" class="chart-small"></canvas></div>
+        <div class="card"><h2>Client Status</h2><canvas id="clientChart" class="chart-small"></canvas></div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+        <h2>Business Performance</h2>
+        <div class="performance">
+            <div class="perf-box"><span>Monthly Revenue</span><strong class="blue">Ksh <?php echo number_format($monthlyRevenue); ?></strong></div>
+            <div class="perf-box"><span>Average Revenue/User</span><strong class="green">Ksh <?php echo number_format($averageRevenuePerUser); ?></strong></div>
+            <div class="perf-box"><span>Collection Rate</span><strong class="blue"><?php echo $collectionRate; ?>%</strong></div>
+            <div class="perf-box"><span>Active Packages</span><strong class="orange"><?php echo $totalPackages; ?></strong></div>
+            <div class="perf-box"><span>Total Vouchers</span><strong class="blue"><?php echo $totalVouchers; ?></strong></div>
+            <div class="perf-box"><span>Unused Vouchers</span><strong class="green"><?php echo $unusedVouchers; ?></strong></div>
+            <div class="perf-box"><span>Used Vouchers</span><strong class="orange"><?php echo $usedVouchers; ?></strong></div>
+            <div class="perf-box"><span>System Mode</span><strong class="green">LIVE</strong></div>
+        </div>
+    </div>
+
+    <div class="two-grid">
+        <div class="card"><h2>Package Subscription Stats</h2><canvas id="packageChart" class="chart-small"></canvas></div>
+        <div class="card"><h2>Voucher Status</h2><canvas id="voucherChart" class="chart-small"></canvas></div>
+    </div>
+
+</div>
+
+<script>
+new Chart(document.getElementById('revenueChart'), {
+    type: 'line',
+    data: {labels: <?php echo json_encode($labels); ?>, datasets: [{label: 'Revenue Ksh', data: <?php echo json_encode($values); ?>, borderWidth: 3, tension: .4, fill: true}]},
+    options:{responsive:true,maintainAspectRatio:true}
+});
+
+new Chart(document.getElementById('clientChart'), {
+    type: 'doughnut',
+    data: {labels: ['Active', 'Expired', 'Blocked'], datasets: [{data: [<?php echo $activeClients; ?>, <?php echo $expiredClients; ?>, <?php echo $blockedClients; ?>]}]},
+    options:{responsive:true,maintainAspectRatio:true}
+});
+
+new Chart(document.getElementById('packageChart'), {
+    type: 'bar',
+    data: {labels: <?php echo json_encode($packageLabels); ?>, datasets: [{label: 'Clients Per Package', data: <?php echo json_encode($packageValues); ?>, borderWidth: 2}]},
+    options:{responsive:true,maintainAspectRatio:true}
+});
+
+new Chart(document.getElementById('voucherChart'), {
+    type: 'pie',
+    data: {labels: ['Unused', 'Used'], datasets: [{data: [<?php echo $unusedVouchers; ?>, <?php echo $usedVouchers; ?>]}]},
+    options:{responsive:true,maintainAspectRatio:true}
+});
+</script>
+<script>
+function confirmLogout(event) {
+    event.preventDefault();
+    document.getElementById("logoutModal").style.display = "flex";
+}
+
+function closeLogout() {
+    document.getElementById("logoutModal").style.display = "none";
+}
+</script>
+
+<style>
+.logout-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    margin-top: 20px;
+    border-radius: 12px;
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.35);
+    color: #ff6b6b;
+    text-decoration: none;
+    font-weight: 700;
+    transition: 0.3s;
+}
+
+.logout-btn:hover {
+    background: rgba(239,68,68,0.22);
+    color: white;
+}
+
+.logout-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+
+.logout-box {
+    background: white;
+    color: #111827;
+    width: 90%;
+    max-width: 350px;
+    padding: 24px;
+    border-radius: 18px;
+    text-align: center;
+}
+
+.logout-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.logout-actions button,
+.logout-actions a {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: none;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.logout-actions button {
+    background: #e5e7eb;
+}
+
+.logout-actions a {
+    background: #ef4444;
+    color: white;
+}
+</style>
+<script>
+function toggleSupport() {
+    const dropdown = document.getElementById("supportDropdown");
+    const arrow = document.getElementById("supportArrow");
+
+    if (dropdown.style.display === "block") {
+        dropdown.style.display = "none";
+        arrow.innerHTML = "▼";
+    } else {
+        dropdown.style.display = "block";
+        arrow.innerHTML = "▲";
+    }
+}
+</script>
+
+<style>
+.support-card {
+    margin-top: 18px;
+    padding: 14px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(34,197,94,0.2);
+}
+
+.support-toggle {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #22c55e;
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+}
+
+.support-dropdown {
+    display: none;
+    margin-top: 14px;
+}
+
+.support-dropdown a {
+    display: block;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.06);
+    color: #dbeafe;
+    text-decoration: none;
+    transition: 0.25s;
+}
+
+.support-dropdown a:hover {
+    background: rgba(34,197,94,0.2);
+    transform: translateX(5px);
+}
+</style>
+<script>
+function toggleSettings() {
+    const box = document.getElementById("settingsDropdown");
+    const arrow = document.getElementById("settingsArrow");
+
+    if (box.style.display === "block") {
+        box.style.display = "none";
+        arrow.innerHTML = "▼";
+    } else {
+        box.style.display = "block";
+        arrow.innerHTML = "▲";
+    }
+}
+
+function applyTheme(theme) {
+    document.body.classList.remove("theme-dark", "theme-light");
+
+    if (theme === "system") {
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.body.classList.add(prefersDark ? "theme-dark" : "theme-light");
+    } else {
+        document.body.classList.add("theme-" + theme);
+    }
+}
+
+function changeTheme(theme) {
+    localStorage.setItem("mhakim_theme", theme);
+    applyTheme(theme);
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    const savedTheme = localStorage.getItem("mhakim_theme") || "dark";
+    const themeSelect = document.getElementById("themeSelect");
+
+    if (themeSelect) {
+        themeSelect.value = savedTheme;
+    }
+
+    applyTheme(savedTheme);
+
+    const savedLogo = localStorage.getItem("mhakim_logo");
+    const logoPreview = document.getElementById("companyLogoPreview");
+
+    if (savedLogo && logoPreview) {
+        logoPreview.src = savedLogo;
+        logoPreview.style.display = "block";
+    }
+
+    const logoInput = document.getElementById("logoInput");
+
+    if (logoInput) {
+        logoInput.addEventListener("change", function () {
+            const file = this.files[0];
+
+            if (!file) return;
+
+            const reader = new FileReader();
+
+            reader.onload = function (e) {
+                localStorage.setItem("mhakim_logo", e.target.result);
+                logoPreview.src = e.target.result;
+                logoPreview.style.display = "block";
+            };
+
+            reader.readAsDataURL(file);
+        });
+    }
+});
+</script>
+
+<style>
+body.theme-dark {
+    background:
+        radial-gradient(circle at top left, rgba(34,197,94,0.20), transparent 35%),
+        radial-gradient(circle at top right, rgba(14,165,233,0.18), transparent 30%),
+        linear-gradient(135deg, #020617, #0f172a, #052e2b) !important;
+    color: #e5e7eb;
+}
+
+body.theme-light {
+    background:
+        radial-gradient(circle at top left, rgba(34,197,94,0.20), transparent 35%),
+        radial-gradient(circle at top right, rgba(14,165,233,0.18), transparent 30%),
+        linear-gradient(135deg, #f8fafc, #e0f2fe, #ecfdf5) !important;
+    color: #111827;
+}
+
+.settings-card {
+    margin-top: 18px;
+    padding: 14px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(14,165,233,0.25);
+}
+
+.settings-toggle {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #38bdf8;
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+.settings-dropdown {
+    display: none;
+    margin-top: 14px;
+}
+
+.settings-dropdown label {
+    display: block;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #93c5fd;
+}
+
+.settings-dropdown input,
+.settings-dropdown select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(15,23,42,0.8);
+    color: white;
+    outline: none;
+}
+
+.logo-preview-box {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.08);
+    text-align: center;
+}
+
+.logo-preview-box img {
+    display: none;
+    max-width: 100%;
+    max-height: 70px;
+    object-fit: contain;
+    border-radius: 10px;
+}
+
+body.theme-light .settings-card,
+body.theme-light .support-card {
+    background: rgba(255,255,255,0.75);
+    border-color: rgba(14,165,233,0.25);
+}
+
+body.theme-light .settings-dropdown input,
+body.theme-light .settings-dropdown select {
+    background: white;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+}
+
+body.theme-light .logo-preview-box {
+    background: #f1f5f9;
+}
+</style>
+</body>
+</html>

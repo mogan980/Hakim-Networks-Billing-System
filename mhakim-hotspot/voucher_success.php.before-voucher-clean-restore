@@ -1,0 +1,39 @@
+<?php
+$u=$_GET["u"] ?? "";
+$p=$_GET["p"] ?? "";
+if(!$u || !$p){header("Location:index.php");exit;}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voucher Login</title>
+<style>
+body{margin:0;font-family:Arial;background:linear-gradient(135deg,#020617,#064e3b);color:white;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{width:90%;max-width:420px;background:#0f172a;border-radius:25px;padding:30px;text-align:center}
+h1{color:#22c55e}
+.box{background:#020617;padding:12px;border-radius:12px;margin:10px 0}
+.btn{background:#22c55e;color:white;border:0;border-radius:14px;padding:14px;font-weight:900;width:100%;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>✅ Voucher Accepted</h1>
+<p>Connecting to MikroTik Hotspot...</p>
+<div class="box">Username: <?php echo htmlspecialchars($u); ?></div>
+<div class="box">Password: <?php echo htmlspecialchars($p); ?></div>
+<button class="btn" onclick="document.getElementById('f').submit()">Connect Internet</button>
+<a class="btn" style="display:block;text-decoration:none;background:#334155" href="index.php">Back to Packages</a>
+</div>
+
+<form id="f" method="post" action="http://192.168.88.1/login" style="display:none">
+<input type="hidden" name="username" value="<?php echo htmlspecialchars($u); ?>">
+<input type="hidden" name="password" value="<?php echo htmlspecialchars($p); ?>">
+<input type="hidden" name="dst" value="http://neverssl.com/">
+</form>
+
+<script>
+setTimeout(()=>document.getElementById("f").submit(),1200);
+</script>
+</body>
+</html>

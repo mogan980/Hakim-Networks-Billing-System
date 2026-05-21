@@ -1,0 +1,131 @@
+<?php
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+function cleanPhone($phone){
+    $phone = preg_replace("/[^0-9]/", "", $phone);
+    if(substr($phone,0,1)==="0"){
+        $phone = "254".substr($phone,1);
+    }
+    if(substr($phone,0,3)!=="254"){
+        $phone = "254".$phone;
+    }
+    return $phone;
+}
+
+function curlJson($url, $headers=[], $payload=null){
+    $ch = curl_init($url);
+
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+    curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+    curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 45);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_DNS_CACHE_TIMEOUT, 0);
+
+    if($payload !== null){
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    }
+
+    $res = curl_exec($ch);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if($err){
+        throw new Exception($err);
+    }
+
+    return [json_decode($res,true), $res];
+}
+
+try{
+    $phone = cleanPhone($_POST["phone"] ?? "");
+    $amount = (int)($_POST["amount"] ?? 0);
+    $packageId = $_POST["package_id"] ?? null;
+
+    if(!$phone || $amount <= 0){
+        throw new Exception("Phone or amount missing");
+    }
+
+    $settings = $pdo->query("SELECT * FROM mpesa_settings WHERE id=1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+
+    if(!$settings){
+        throw new Exception("M-Pesa settings missing");
+    }
+
+    $key = trim($settings["consumer_key"]);
+    $secret = trim($settings["consumer_secret"]);
+    $shortcode = trim($settings["shortcode"]);
+    $passkey = trim($settings["passkey"]);
+    $callback = trim($settings["callback_url"]);
+
+    if(!$key || !$secret || !$shortcode || !$passkey || !$callback){
+        throw new Exception("Production M-Pesa credentials or callback missing");
+    }
+
+    [$tokenData,$tokenRaw] = curlJson(
+        "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+        ["Authorization: Basic ".base64_encode($key.":".$secret)]
+    );
+
+    if(empty($tokenData["access_token"])){
+        throw new Exception("Token failed: ".$tokenRaw);
+    }
+
+    $token = $tokenData["access_token"];
+    $timestamp = date("YmdHis");
+    $password = base64_encode($shortcode.$passkey.$timestamp);
+
+    $payload = [
+        "BusinessShortCode" => $shortcode,
+        "Password" => $password,
+        "Timestamp" => $timestamp,
+        "TransactionType" => $settings["transaction_type"],
+        "Amount" => $amount,
+        "PartyA" => $phone,
+        "PartyB" => $shortcode,
+        "PhoneNumber" => $phone,
+        "CallBackURL" => $callback,
+        "AccountReference" => "HakimNet",
+        "TransactionDesc" => "Hotspot Internet"
+    ];
+
+    [$stkData,$stkRaw] = curlJson(
+        "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+        [
+            "Authorization: Bearer ".$token,
+            "Content-Type: application/json"
+        ],
+        $payload
+    );
+
+    if(empty($stkData["CheckoutRequestID"])){
+        throw new Exception("STK failed: ".$stkRaw);
+    }
+
+    $checkout = $stkData["CheckoutRequestID"];
+
+    $stmt = $pdo->prepare("
+        INSERT INTO payments
+        (amount, method, status, checkout_id, phone, package_id, client_ip, created_at)
+        VALUES (?, 'mpesa', 'pending', ?, ?, ?, ?, NOW())
+    ");
+
+    $stmt->execute([
+        $amount,
+        $checkout,
+        $phone,
+        $packageId,
+        $_SERVER["REMOTE_ADDR"] ?? null
+    ]);
+
+    header("Location: wait_payment.php?checkout_id=".urlencode($checkout));
+    exit;
+
+}catch(Exception $e){
+    echo "STK ERROR: ".$e->getMessage();
+}

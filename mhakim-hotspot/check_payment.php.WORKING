@@ -1,0 +1,202 @@
+<?php
+header("Content-Type: application/json");
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$checkoutId = $_GET["checkout_id"] ?? "";
+
+function respond($data){
+    echo json_encode($data);
+    exit;
+}
+
+function speedLimit($speed, $fallback){
+    $speed = trim((string)$speed);
+    if($speed === "") return $fallback;
+    if(preg_match('/^\d+$/', $speed)) return $speed . "M";
+    return strtoupper($speed);
+}
+
+function activateInternet($pdo, $checkoutId){
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            payments.*,
+            clients.id AS client_id,
+            clients.username,
+            clients.password,
+            clients.package_id,
+            packages.speed_down,
+            packages.speed_up,
+            packages.duration_hours
+        FROM payments
+        LEFT JOIN clients 
+            ON clients.phone = payments.phone 
+            OR clients.username = payments.phone
+        LEFT JOIN packages 
+            ON packages.id = clients.package_id
+        WHERE payments.checkout_id=?
+        ORDER BY clients.id DESC
+        LIMIT 1
+    ");
+    $stmt->execute([$checkoutId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if(!$row || !$row["username"]){
+        return null;
+    }
+
+    $duration = (float)($row["duration_hours"] ?? 1);
+    if($duration <= 0) $duration = 1;
+
+    $expiresAt = date("Y-m-d H:i:s", strtotime("+{$duration} hours"));
+
+    $pdo->prepare("
+        UPDATE clients
+        SET status='active',
+            starts_at=NOW(),
+            expires_at=?,
+            connection_type='hotspot'
+        WHERE id=?
+    ")->execute([
+        $expiresAt,
+        $row["client_id"]
+    ]);
+
+    $settings = $pdo->query("
+        SELECT *
+        FROM mikrotik_settings
+        ORDER BY id DESC
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if(!$settings){
+        return [
+            "username"=>$row["username"],
+            "password"=>$row["password"],
+            "login_url"=>"http://login.hakim/login"
+        ];
+    }
+
+    $api = new Client(new Config([
+        "host" => $settings["router_ip"],
+        "user" => $settings["router_username"],
+        "pass" => $settings["router_password"],
+        "port" => (int)$settings["api_port"],
+        "timeout" => 5
+    ]));
+
+    $down = speedLimit($row["speed_down"] ?? "", "6M");
+    $up   = speedLimit($row["speed_up"] ?? "", "2M");
+
+    $profileName = "PAYMENT-" . $down . "-" . $up;
+    $rateLimit = $down . "/" . $up;
+
+    $profile = $api->query(
+        (new Query("/ip/hotspot/user/profile/print"))
+            ->where("name", $profileName)
+    )->read();
+
+    if(empty($profile)){
+        $api->query(
+            (new Query("/ip/hotspot/user/profile/add"))
+                ->equal("name", $profileName)
+                ->equal("rate-limit", $rateLimit)
+                ->equal("shared-users", "1")
+        )->read();
+    }
+
+    $user = $api->query(
+        (new Query("/ip/hotspot/user/print"))
+            ->where("name", $row["username"])
+    )->read();
+
+    if(empty($user)){
+        $api->query(
+            (new Query("/ip/hotspot/user/add"))
+                ->equal("name", $row["username"])
+                ->equal("password", $row["password"])
+                ->equal("profile", $profileName)
+                ->equal("comment", "mpesa:" . $checkoutId)
+                ->equal("disabled", "no")
+        )->read();
+    } else {
+        $api->query(
+            (new Query("/ip/hotspot/user/set"))
+                ->equal(".id", $user[0][".id"])
+                ->equal("password", $row["password"])
+                ->equal("profile", $profileName)
+                ->equal("disabled", "no")
+        )->read();
+    }
+
+    return [
+        "username"=>$row["username"],
+        "password"=>$row["password"],
+        "login_url"=>"http://login.hakim/login"
+    ];
+}
+
+if(!$checkoutId){
+    respond(["status"=>"missing"]);
+}
+
+$paymentStmt = $pdo->prepare("
+    SELECT *
+    FROM payments
+    WHERE checkout_id=?
+    ORDER BY id DESC
+    LIMIT 1
+");
+$paymentStmt->execute([$checkoutId]);
+$payment = $paymentStmt->fetch(PDO::FETCH_ASSOC);
+
+if(!$payment){
+    respond(["status"=>"pending"]);
+}
+
+if($payment["status"] === "paid"){
+    $login = activateInternet($pdo, $checkoutId);
+    respond(["status"=>"paid"] + ($login ?? []));
+}
+
+if($payment["status"] === "failed"){
+    respond(["status"=>"failed"]);
+}
+
+/*
+ * Sandbox helper:
+ * If callback is delayed, auto-approve after 20 seconds.
+ * Remove this block when Daraja LIVE is fully approved.
+ */
+$mpesa = $pdo->query("
+    SELECT environment
+    FROM mpesa_settings
+    WHERE status='active'
+    ORDER BY id DESC
+    LIMIT 1
+")->fetch(PDO::FETCH_ASSOC);
+
+$age = time() - strtotime($payment["created_at"]);
+
+if(strtolower($mpesa["environment"] ?? "sandbox") === "sandbox" && $age >= 20){
+
+    $pdo->prepare("
+        UPDATE payments
+        SET status='paid',
+            mpesa_receipt=COALESCE(mpesa_receipt, CONCAT('SANDBOX-', id))
+        WHERE checkout_id=?
+    ")->execute([$checkoutId]);
+
+    $login = activateInternet($pdo, $checkoutId);
+
+    respond(["status"=>"paid"] + ($login ?? []));
+}
+
+respond(["status"=>"pending"]);

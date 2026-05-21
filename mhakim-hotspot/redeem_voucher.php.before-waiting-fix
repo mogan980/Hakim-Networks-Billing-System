@@ -1,0 +1,114 @@
+<?php
+require_once __DIR__ . "/router_connect.php";
+
+use RouterOS\Query;
+
+$code = trim($_POST["voucher"] ?? $_POST["code"] ?? $_POST["voucher_code"] ?? "");
+
+if(!$code){
+    header("Location: index.php?error=" . urlencode("Voucher code missing"));
+    exit;
+}
+
+try{
+    $stmt = $pdo->prepare("SELECT * FROM vouchers WHERE code=? LIMIT 1");
+    $stmt->execute([$code]);
+    $voucher = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if(!$voucher){
+        header("Location: index.php?error=" . urlencode("Invalid voucher"));
+        exit;
+    }
+
+    if(($voucher["status"] ?? "") === "used"){
+        header("Location: index.php?error=" . urlencode("Voucher already used"));
+        exit;
+    }
+
+    $api = hotspotRouter();
+
+    $username = preg_replace("/[^0-9A-Za-z_-]/", "", $code);
+    $password = $username;
+    $clientIp = $_SERVER["REMOTE_ADDR"] ?? "";
+
+    $profile = "default";
+    $limit = "1h";
+
+    if(!empty($voucher["package_id"])){
+        $p = $pdo->prepare("SELECT * FROM packages WHERE id=? LIMIT 1");
+        $p->execute([$voucher["package_id"]]);
+        $pkg = $p->fetch(PDO::FETCH_ASSOC);
+
+        if($pkg){
+            $down = $pkg["speed_down"] ?? "8M";
+            $up = $pkg["speed_up"] ?? "2M";
+            $limit = max(1, ceil((float)($pkg["duration_hours"] ?? 1))) . "h";
+            $profile = "VOUCHER-" . preg_replace("/[^0-9A-Za-z_-]/", "", $down . "-" . $up);
+
+            $existsProfile = $api->query(
+                (new Query("/ip/hotspot/user/profile/print"))
+                ->where("name", $profile)
+            )->read();
+
+            if(empty($existsProfile)){
+                try{
+                    $api->query(
+                        (new Query("/ip/hotspot/user/profile/add"))
+                        ->equal("name", $profile)
+                        ->equal("rate-limit", $up . "/" . $down)
+                    )->read();
+                }catch(Exception $e){
+                    $profile = "default";
+                }
+            }
+        }
+    }
+
+    $existing = $api->query(
+        (new Query("/ip/hotspot/user/print"))
+        ->where("name", $username)
+    )->read();
+
+    if(empty($existing)){
+        $api->query(
+            (new Query("/ip/hotspot/user/add"))
+            ->equal("name", $username)
+            ->equal("password", $password)
+            ->equal("profile", $profile)
+            ->equal("limit-uptime", $limit)
+            ->equal("disabled", "no")
+            ->equal("comment", "voucher:" . $code)
+        )->read();
+    }else{
+        foreach($existing as $u){
+            if(!empty($u[".id"])){
+                $api->query(
+                    (new Query("/ip/hotspot/user/set"))
+                    ->equal(".id", $u[".id"])
+                    ->equal("password", $password)
+                    ->equal("profile", $profile)
+                    ->equal("limit-uptime", $limit)
+                    ->equal("disabled", "no")
+                )->read();
+            }
+        }
+    }
+
+    // REAL HOTSPOT LOGIN THROUGH ROUTEROS API
+    $api->query(
+        (new Query("/ip/hotspot/active/login"))
+        ->equal("user", $username)
+        ->equal("password", $password)
+        ->equal("ip", $clientIp)
+    )->read();
+
+    $pdo->prepare("UPDATE vouchers SET status='used', used_at=NOW() WHERE id=?")
+        ->execute([$voucher["id"]]);
+
+    header("Location: http://neverssl.com/");
+    exit;
+
+}catch(Exception $e){
+    header("Location: index.php?error=" . urlencode($e->getMessage()));
+    exit;
+}

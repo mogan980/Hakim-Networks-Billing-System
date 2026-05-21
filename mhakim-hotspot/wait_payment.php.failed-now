@@ -1,0 +1,169 @@
+<?php
+$checkoutId = $_GET["checkout_id"] ?? "";
+if(!$checkoutId){
+    header("Location: index.php");
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waiting for Payment</title>
+<style>
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:linear-gradient(135deg,#020617,#064e3b);
+    color:white;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+}
+.card{
+    width:90%;
+    max-width:430px;
+    background:#0f172a;
+    border-radius:26px;
+    padding:35px 25px;
+    text-align:center;
+    box-shadow:0 25px 70px rgba(0,0,0,.35);
+}
+.spinner{
+    width:80px;
+    height:80px;
+    border:10px solid #334155;
+    border-top-color:#22c55e;
+    border-radius:50%;
+    animation:spin 1s linear infinite;
+    margin:0 auto 25px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{color:#22c55e;font-size:32px}
+.status{
+    background:#020617;
+    padding:16px;
+    border-radius:16px;
+    margin-top:20px;
+    font-size:18px;
+}
+.small{
+    color:#94a3b8;
+    word-break:break-all;
+    margin-top:20px;
+}
+.btn{
+    display:none;
+    margin-top:20px;
+    background:#22c55e;
+    color:white;
+    border:none;
+    border-radius:14px;
+    padding:14px 18px;
+    font-weight:900;
+    width:100%;
+}
+</style>
+</head>
+<body>
+
+<div class="card">
+    <div class="spinner"></div>
+
+    <h1>Waiting for Payment</h1>
+
+    <p>Enter your M-Pesa PIN on your phone.<br>Internet will activate automatically.</p>
+
+    <div class="status" id="statusBox">
+        Checking payment...
+    </div>
+
+    <button class="btn" id="manualBtn" onclick="document.getElementById('loginForm').submit();">
+        Connect Internet
+    </button>
+
+    <div class="small">
+        Checkout: <?php echo htmlspecialchars($checkoutId); ?>
+    </div>
+
+    <form id="loginForm" method="post" action="http://login.hakim/login" style="display:none;">
+        <input type="hidden" name="username" id="loginUsername">
+        <input type="hidden" name="password" id="loginPassword">
+        <input type="hidden" name="dst" value="http://login.hakim/status">
+    </form>
+</div>
+
+<script>
+let tries = 0;
+
+async function checkPayment(){
+    tries++;
+
+    try{
+        const response = await fetch(
+            "check_payment.php?checkout_id=<?php echo urlencode($checkoutId); ?>&t=" + Date.now(),
+            {cache:"no-store"}
+        );
+
+        const text = await response.text();
+
+        let data;
+        try{
+            data = JSON.parse(text);
+        }catch(e){
+            document.getElementById("statusBox").innerHTML =
+                "Server response error. Retrying... (" + tries + ")";
+            setTimeout(checkPayment,3000);
+            return;
+        }
+
+        if(data.status === "paid"){
+            document.getElementById("statusBox").innerHTML =
+                "✅ Payment received. Activating internet...";
+
+            document.getElementById("loginUsername").value = data.username || "";
+            document.getElementById("loginPassword").value = data.password || "";
+
+            document.getElementById("manualBtn").style.display = "block";
+
+            setTimeout(function(){
+                document.getElementById("loginForm").submit();
+            },1200);
+
+            return;
+        }
+
+        if(data.status === "failed"){
+            document.getElementById("statusBox").innerHTML =
+                "❌ Payment failed. Redirecting...";
+            setTimeout(function(){
+                window.location.href = "index.php";
+            },2500);
+            return;
+        }
+
+        if(data.status === "error"){
+            document.getElementById("statusBox").innerHTML =
+                "Activation error: " + (data.message || "Unknown error");
+            setTimeout(checkPayment,3000);
+            return;
+        }
+
+        document.getElementById("statusBox").innerHTML =
+            "Waiting for payment confirmation... (" + tries + ")";
+
+        setTimeout(checkPayment,3000);
+
+    }catch(e){
+        document.getElementById("statusBox").innerHTML =
+            "Connection issue. Retrying... (" + tries + ")";
+        setTimeout(checkPayment,3000);
+    }
+}
+
+checkPayment();
+</script>
+
+</body>
+</html>

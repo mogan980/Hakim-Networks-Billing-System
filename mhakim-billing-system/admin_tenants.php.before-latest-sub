@@ -1,0 +1,345 @@
+<?php
+session_start();
+require_once "config/database.php";
+
+if (($_SESSION["tenant_role"] ?? "") !== "super_admin") {
+    header("Location: saas_auth.php");
+    exit;
+}
+
+$msg = "";
+
+if (isset($_GET["delete"])) {
+    $id = (int)$_GET["delete"];
+
+    $pdo->prepare("DELETE FROM tenant_users WHERE company_id=?")->execute([$id]);
+    $pdo->prepare("DELETE FROM subscriptions WHERE company_id=?")->execute([$id]);
+    $pdo->prepare("DELETE FROM companies WHERE id=?")->execute([$id]);
+
+    $msg = "Tenant deleted successfully.";
+}
+
+if (isset($_GET["suspend"])) {
+    $id = (int)$_GET["suspend"];
+    $pdo->prepare("UPDATE companies SET status='suspended' WHERE id=?")->execute([$id]);
+    $msg = "Tenant suspended.";
+}
+
+if (isset($_GET["activate"])) {
+    $id = (int)$_GET["activate"];
+    $expires = date("Y-m-d H:i:s", strtotime("+1 month"));
+
+    $pdo->prepare("UPDATE companies SET status='active' WHERE id=?")->execute([$id]);
+
+    $pdo->prepare("
+        INSERT INTO subscriptions(company_id, amount, status, starts_at, expires_at, created_at)
+        VALUES(?,1000,'active',NOW(),?,NOW())
+    ")->execute([$id, $expires]);
+
+    $msg = "Tenant activated for 1 month.";
+}
+
+if (isset($_GET["disconnect"])) {
+    $id = (int)$_GET["disconnect"];
+
+    $pdo->prepare("
+        UPDATE companies
+        SET router_ip=NULL, router_user=NULL, router_pass=NULL
+        WHERE id=?
+    ")->execute([$id]);
+
+    $pdo->prepare("
+        INSERT INTO tenant_router_logs(company_id,action_type,router_ip,message)
+        VALUES(?,'admin_disconnect','','Super admin disconnected tenant router')
+    ")->execute([$id]);
+
+    $msg = "Tenant router disconnected.";
+}
+
+$tenants = $pdo->query("
+    SELECT 
+        c.*,
+        u.full_name,
+        u.email AS user_email,
+        u.phone AS user_phone,
+        u.status AS user_status,
+        s.status AS sub_status,
+        s.expires_at,
+        (
+            SELECT COUNT(*) FROM clients WHERE company_id=c.id
+        ) AS total_clients,
+        (
+            SELECT COALESCE(SUM(amount),0) FROM payments WHERE company_id=c.id AND status='paid'
+        ) AS total_revenue,
+        (
+            SELECT COUNT(*) FROM vouchers WHERE company_id=c.id
+        ) AS total_vouchers
+    FROM companies c
+    LEFT JOIN tenant_users u ON u.company_id=c.id
+    LEFT JOIN subscriptions s ON s.company_id=c.id
+    WHERE u.role IS NULL OR u.role != 'super_admin'
+    ORDER BY c.id DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Tenants - Super Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box}
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#e7f8ff;
+    color:#0f172a;
+}
+.sidebar{
+    width:245px;
+    height:100vh;
+    position:fixed;
+    left:0;
+    top:0;
+    background:linear-gradient(180deg,#020617,#052e2b);
+    padding:18px 12px;
+    color:white;
+    overflow:auto;
+}
+.brand{
+    background:rgba(15,23,42,.75);
+    padding:18px;
+    border-radius:18px;
+    margin-bottom:18px;
+}
+.brand h2{margin:0}
+.brand p{color:#94a3b8;font-size:12px}
+.sidebar a{
+    display:block;
+    color:white;
+    text-decoration:none;
+    padding:13px 14px;
+    border-radius:12px;
+    margin:7px 0;
+    background:rgba(15,23,42,.62);
+    font-weight:800;
+    font-size:14px;
+}
+.sidebar a:hover,.sidebar a.active{
+    background:#064e3b;
+}
+.main{
+    margin-left:245px;
+    padding:22px;
+}
+.command{
+    background:linear-gradient(135deg,#0f172a,#166534);
+    color:white;
+    border-radius:22px;
+    padding:24px;
+    margin-bottom:18px;
+    box-shadow:0 12px 30px rgba(15,23,42,.18);
+}
+.command h1{margin:0;font-size:30px}
+.command p{color:#d1fae5}
+.dot{
+    display:inline-block;
+    width:12px;
+    height:12px;
+    background:#22c55e;
+    border-radius:50%;
+    box-shadow:0 0 16px #22c55e;
+}
+.stats{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:14px;
+    margin-bottom:18px;
+}
+.card{
+    background:white;
+    border-radius:18px;
+    padding:18px;
+    box-shadow:0 12px 35px rgba(15,23,42,.08);
+}
+.card h3{margin:0;color:#475569;font-size:13px}
+.card strong{display:block;margin-top:10px;font-size:27px;color:#16a34a}
+.panel{
+    background:white;
+    border-radius:20px;
+    padding:18px;
+    box-shadow:0 12px 35px rgba(15,23,42,.08);
+}
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+th,td{
+    padding:14px;
+    text-align:left;
+    border-bottom:1px solid #e5e7eb;
+    font-size:14px;
+}
+th{
+    color:#166534;
+    text-transform:uppercase;
+    font-size:12px;
+}
+.badge{
+    display:inline-block;
+    padding:7px 10px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:900;
+}
+.green{background:#dcfce7;color:#15803d}
+.red{background:#fee2e2;color:#dc2626}
+.orange{background:#ffedd5;color:#ea580c}
+.blue{background:#dbeafe;color:#2563eb}
+.actions a{
+    display:inline-block;
+    text-decoration:none;
+    padding:8px 10px;
+    border-radius:10px;
+    margin:3px;
+    font-size:12px;
+    font-weight:900;
+}
+.btn-green{background:#16a34a;color:white}
+.btn-orange{background:#f97316;color:white}
+.btn-red{background:#dc2626;color:white}
+.btn-blue{background:#2563eb;color:white}
+.alert{
+    background:#dcfce7;
+    color:#166534;
+    padding:14px;
+    border-radius:14px;
+    margin-bottom:14px;
+    font-weight:900;
+}
+@media(max-width:1000px){
+    .sidebar{position:relative;width:100%;height:auto}
+    .main{margin-left:0}
+    .stats{grid-template-columns:1fr}
+    .panel{overflow-x:auto}
+}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="brand">
+        <h2>M.Hakim</h2>
+        <p>Super Admin Control</p>
+    </div>
+
+    <a href="/mhakim-billing-system/noc_final_clean.php">📊 Dashboard</a>
+    <a class="active" href="/mhakim-billing-system/admin_tenants.php">🏢 Tenants</a>
+    <a href="/mhakim-billing-system/clients.php">👥 Clients</a>
+    <a href="/mhakim-billing-system/packages.php">📦 Packages</a>
+    <a href="/mhakim-billing-system/vouchers.php">🎟️ Vouchers</a>
+    <a href="/mhakim-billing-system/payments.php">💳 Payments</a>
+    <a href="/mhakim-billing-system/router_wizard.php">🧙 Router Wizard</a>
+    <a href="/mhakim-billing-system/logout.php">🚪 Logout</a>
+</div>
+
+<div class="main">
+
+<div class="command">
+    <h1><span class="dot"></span> Tenant Management Center</h1>
+    <p>Monitor registered ISP businesses, subscription status, router connection and tenant activity.</p>
+</div>
+
+<?php if($msg): ?>
+<div class="alert"><?php echo htmlspecialchars($msg); ?></div>
+<?php endif; ?>
+
+<div class="stats">
+    <div class="card"><h3>Total Tenants</h3><strong id="totalTenants"><?php echo count($tenants); ?></strong></div>
+    <div class="card"><h3>Active Tenants</h3><strong id="activeTenants">0</strong></div>
+    <div class="card"><h3>Connected Routers</h3><strong id="connectedRouters">0</strong></div>
+    <div class="card"><h3>Tenant Revenue</h3><strong id="tenantRevenue">KES 0</strong></div>
+</div>
+
+<div class="panel">
+<h2 style="color:#166534;">Registered Tenants</h2>
+
+<table>
+<thead>
+<tr>
+<th>Company</th>
+<th>Owner</th>
+<th>Contact</th>
+<th>Status</th>
+<th>Subscription</th>
+<th>Router</th>
+<th>Clients</th>
+<th>Revenue</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="tenantTable">
+<?php foreach($tenants as $t): ?>
+<tr>
+<td>
+<b><?php echo htmlspecialchars($t["company_name"] ?? "-"); ?></b><br>
+<small>ID: <?php echo (int)$t["id"]; ?></small>
+</td>
+<td><?php echo htmlspecialchars($t["full_name"] ?? $t["owner_name"] ?? "-"); ?></td>
+<td>
+<?php echo htmlspecialchars($t["user_email"] ?? $t["email"] ?? "-"); ?><br>
+<small><?php echo htmlspecialchars($t["user_phone"] ?? $t["phone"] ?? "-"); ?></small>
+</td>
+<td>
+<span class="badge <?php echo ($t["status"] === "active") ? "green" : (($t["status"] === "suspended") ? "red" : "orange"); ?>">
+<?php echo htmlspecialchars($t["status"] ?? "pending"); ?>
+</span>
+</td>
+<td>
+<span class="badge <?php echo (($t["sub_status"] ?? "") === "active" || ($t["sub_status"] ?? "") === "paid") ? "green" : "orange"; ?>">
+<?php echo htmlspecialchars($t["sub_status"] ?? "pending"); ?>
+</span><br>
+<small><?php echo htmlspecialchars($t["expires_at"] ?? "No expiry"); ?></small>
+</td>
+<td>
+<?php if(!empty($t["router_ip"])): ?>
+<span class="badge green">Connected</span><br>
+<small><?php echo htmlspecialchars($t["router_ip"]); ?></small>
+<?php else: ?>
+<span class="badge red">Disconnected</span>
+<?php endif; ?>
+</td>
+<td><?php echo (int)$t["total_clients"]; ?></td>
+<td>KES <?php echo number_format((float)$t["total_revenue"]); ?></td>
+<td class="actions">
+<a class="btn-green" href="?activate=<?php echo (int)$t["id"]; ?>">Activate</a>
+<a class="btn-orange" href="?suspend=<?php echo (int)$t["id"]; ?>">Suspend</a>
+<a class="btn-blue" href="?disconnect=<?php echo (int)$t["id"]; ?>">Disconnect</a>
+<a class="btn-red" onclick="return confirm('Delete this tenant?')" href="?delete=<?php echo (int)$t["id"]; ?>">Delete</a>
+</td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+</table>
+</div>
+
+</div>
+
+<script>
+async function syncTenants(){
+    try{
+        const r = await fetch("admin_tenants_live.php?t=" + Date.now(), {cache:"no-store"});
+        const d = await r.json();
+
+        document.getElementById("totalTenants").innerText = d.total_tenants;
+        document.getElementById("activeTenants").innerText = d.active_tenants;
+        document.getElementById("connectedRouters").innerText = d.connected_routers;
+        document.getElementById("tenantRevenue").innerText = "KES " + Number(d.tenant_revenue).toLocaleString();
+    }catch(e){}
+}
+
+syncTenants();
+setInterval(syncTenants, 10000);
+</script>
+
+</body>
+</html>

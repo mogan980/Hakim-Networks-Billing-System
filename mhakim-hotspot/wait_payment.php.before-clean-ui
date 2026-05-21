@@ -1,0 +1,45 @@
+<?php
+$checkoutId = $_GET["checkout_id"] ?? "";
+if(!$checkoutId){ die("Missing checkout id"); }
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waiting Payment</title>
+</head>
+<body>
+<h2>Waiting for M-Pesa payment...</h2>
+<p id="msg">Checking payment...</p>
+
+<form id="loginForm" method="post" action="http://login.hakim/login">
+<input type="hidden" name="username" id="u">
+<input type="hidden" name="password" id="p">
+<input type="hidden" name="dst" value="http://neverssl.com">
+<button type="submit">Continue to Internet</button>
+</form>
+
+<script>
+async function check(){
+    let r = await fetch("check_payment.php?checkout_id=<?php echo urlencode($checkoutId); ?>&t="+Date.now(), {cache:"no-store"});
+    let d = await r.json();
+
+    if(d.status === "paid"){
+        document.getElementById("msg").innerText = "Payment successful. Logging in...";
+        document.getElementById("u").value = d.username;
+        document.getElementById("p").value = d.password;
+        setTimeout(()=>document.getElementById("loginForm").submit(),800);
+        return;
+    }
+
+    if(d.status === "failed"){
+        location.href = "index.php?error=Payment failed";
+        return;
+    }
+
+    setTimeout(check,3000);
+}
+check();
+</script>
+</body>
+</html>

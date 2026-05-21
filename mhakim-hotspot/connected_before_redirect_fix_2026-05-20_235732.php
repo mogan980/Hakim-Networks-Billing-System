@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hakim Networks Connected</title>
+<style>
+body{margin:0;font-family:Arial;background:radial-gradient(circle at top,#16a34a44,#020617 60%);color:white;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center}
+.card{max-width:420px;background:#0b1728;border:1px solid #22c55e66;border-radius:30px;padding:35px}
+.logo{width:76px;height:76px;background:#22c55e;color:#052e16;border-radius:24px;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:900;margin:0 auto 18px}
+a{display:inline-block;background:#22c55e;color:#052e16;text-decoration:none;padding:14px 24px;border-radius:16px;font-weight:900;margin-top:15px}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="logo">H</div>
+<h1>Internet Activated</h1>
+<p>Your device has been allowed automatically.</p>
+<a href="http://neverssl.com">Open Internet</a>
+</div>
+<script>setTimeout(()=>{location.href="http://neverssl.com"},2500);</script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<?php
+require_once __DIR__."/hotspot_core.php";
+
+$code=trim($_POST["voucher"] ?? $_POST["code"] ?? $_POST["voucher_code"] ?? $_GET["voucher"] ?? $_GET["code"] ?? "");
+
+if(!$code){
+    header("Location:index.php?error=Voucher+code+missing");
+    exit;
+}
+
+try{
+    $st=$pdo->prepare("SELECT * FROM vouchers WHERE code=? LIMIT 1");
+    $st->execute([$code]);
+    $v=$st->fetch(PDO::FETCH_ASSOC);
+
+    if(!$v){header("Location:index.php?error=Invalid+voucher");exit;}
+    if(($v["status"] ?? "")==="used"){header("Location:index.php?error=Voucher+already+used");exit;}
+
+    $login=activate_hotspot(
+        $code,
+        $code,
+        $v["package_id"] ?? null,
+        "voucher:".$code
+    );
+
+    $pdo->prepare("UPDATE vouchers SET status='used', used_at=NOW() WHERE id=?")->execute([$v["id"]]);
+
+    header("Location:voucher_success.php?u=".urlencode($login["username"])."&p=".urlencode($login["password"]));
+    exit;
+
+}catch(Exception $e){
+    header("Location:index.php?error=".urlencode($e->getMessage()));
+    exit;
+}

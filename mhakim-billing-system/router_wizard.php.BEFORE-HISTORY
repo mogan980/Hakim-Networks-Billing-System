@@ -1,0 +1,229 @@
+<?php
+require_once "auth.php";
+requireLogin();
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Router Setup Wizard</title>
+<link rel="stylesheet" href="assets/pro-sidebar.css">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;font-family:Arial;background:#020617;color:white}
+.main{margin-left:280px;padding:32px}
+.card{background:#0f172a;border:1px solid #1e293b;border-radius:22px;padding:24px;margin-bottom:22px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+input,textarea{width:100%;padding:13px;border-radius:12px;border:1px solid #334155;background:#020617;color:white;margin:8px 0}
+button{padding:13px 18px;border:0;border-radius:12px;background:#22c55e;color:#052e16;font-weight:900;cursor:pointer}
+.code{background:#020617;border:1px solid #334155;border-radius:14px;padding:16px;white-space:pre-wrap;color:#bbf7d0;font-family:monospace;min-height:220px}
+.video{height:260px;border-radius:18px;background:linear-gradient(135deg,#064e3b,#0f172a);display:flex;align-items:center;justify-content:center;color:#bbf7d0;text-align:center}
+@media(max-width:900px){.main{margin-left:0}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+<h2>Hakim Networks</h2>
+<a href="noc_final_clean.php">Dashboard</a>
+<a href="routers.php">Routers</a>
+<a class="active" href="router_wizard.php">Router Wizard</a>
+<a href="logout.php">Logout</a>
+</div>
+
+<div class="main">
+<h1>Router Setup Wizard</h1>
+<p>Generate a MikroTik one-run setup script for linking a router to Hakim Networks Billing.</p>
+
+<div class="grid">
+<div class="card">
+<h2>Setup Video</h2>
+<div class="video">
+<div>
+<h3>🎥 MikroTik Linking Guide</h3>
+<p>Place your tutorial video here later.</p>
+<p>Example: how to enable API, create billing user, configure hotspot.</p>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h2>Router Details</h2>
+<label>Billing Server IP / Domain</label>
+<input id="server" value="<?php echo htmlspecialchars($_SERVER['HTTP_HOST']); ?>">
+<label>Router IP Address</label>
+<input id="routerIp" placeholder="192.168.88.1">
+
+<label>API Port</label>
+<input id="apiPort" value="8728">
+<label>Router API Username</label>
+<input id="apiUser" value="mhakimapi">
+
+<label>Router API Password</label>
+<input id="apiPass" placeholder="Enter strong password">
+
+<label>Hotspot DNS Name</label>
+<input id="dnsName" value="login.hakim">
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+    <button onclick="generateScript()">
+        Generate MikroTik Script
+    </button>
+
+    <button onclick="testRouter()" style="background:#3b82f6;color:white;">
+        Test Router Connection
+    </button>
+</div>
+
+<div id="routerStatus" style="
+margin-top:15px;
+padding:12px;
+border-radius:12px;
+display:none;
+"></div>
+</div>
+</div>
+
+<div class="card">
+<h2>One-Run MikroTik Script</h2>
+<p>Copy this script and run it once in MikroTik Terminal.</p>
+<div class="code" id="scriptBox">Fill router details then click Generate.</div>
+<br>
+<button onclick="copyScript()">Copy Script</button>
+<button onclick="downloadScript()" style="margin-left:10px;">
+Download .rsc File
+</button>
+</div>
+
+<div class="card">
+<h2>What This Script Does</h2>
+<ul>
+<li>Enables MikroTik API service.</li>
+<li>Creates a dedicated API user for billing.</li>
+<li>Sets hotspot DNS name.</li>
+<li>Adds basic hotspot profile safety settings.</li>
+<li>Prepares router for billing system integration.</li>
+</ul>
+</div>
+
+</div>
+
+<script>
+function generateScript(){
+    const server = document.getElementById("server").value.trim();
+    const user = document.getElementById("apiUser").value.trim();
+    const pass = document.getElementById("apiPass").value.trim();
+    const dns = document.getElementById("dnsName").value.trim();
+
+    if(!pass){
+        alert("Enter API password first.");
+        return;
+    }
+
+    const script = `
+# Hakim Networks MikroTik Setup Script
+# Run once in MikroTik Terminal
+
+/ip service set api disabled=no port=8728
+/ip service set www disabled=no
+
+/user group add name=hakim-billing policy=read,write,api,test,sensitive
+/user add name="${user}" password="${pass}" group=hakim-billing comment="Hakim Networks Billing API User"
+
+/ip hotspot profile set [find] dns-name="${dns}" login-by=http-chap,cookie
+
+/ip dns set allow-remote-requests=yes
+
+/system note set note="Linked to Hakim Networks Billing Server: ${server}"
+
+:put "Hakim Networks router setup completed successfully."
+`;
+
+    document.getElementById("scriptBox").innerText = script.trim();
+}
+
+function copyScript(){
+    const text = document.getElementById("scriptBox").innerText;
+    navigator.clipboard.writeText(text);
+    alert("Script copied.");
+}
+function downloadScript(){
+    const text = document.getElementById("scriptBox").innerText;
+
+    const blob = new Blob([text], {type:"text/plain"});
+
+    const a = document.createElement("a");
+
+    a.href = URL.createObjectURL(blob);
+
+    a.download = "hakim-router-setup.rsc";
+
+    a.click();
+}
+async function testRouter(){
+
+    const routerIp = document.getElementById("routerIp").value.trim();
+    const username = document.getElementById("apiUser").value.trim();
+    const password = document.getElementById("apiPass").value.trim();
+    const apiPort = document.getElementById("apiPort").value.trim();
+
+    const status = document.getElementById("routerStatus");
+
+    if(!routerIp || !username || !password){
+        alert("Fill all router details first.");
+        return;
+    }
+
+    status.style.display = "block";
+    status.style.background = "#172554";
+    status.style.color = "#bfdbfe";
+    status.innerHTML = "Testing router connection...";
+
+    try{
+
+        const formData = new FormData();
+
+        formData.append("router_ip", routerIp);
+        formData.append("username", username);
+        formData.append("password", password);
+        formData.append("api_port", apiPort);
+
+        const response = await fetch(
+            "test_router_connection.php",
+            {
+                method: "POST",
+                body: formData
+            }
+        );
+
+        const data = await response.json();
+
+        if(data.success){
+
+            status.style.background = "#052e16";
+            status.style.color = "#bbf7d0";
+
+            status.innerHTML =
+                "✅ " + data.message;
+
+        }else{
+
+            status.style.background = "#450a0a";
+            status.style.color = "#fecaca";
+
+            status.innerHTML =
+                "❌ " + data.message;
+        }
+
+    }catch(err){
+
+        status.style.background = "#450a0a";
+        status.style.color = "#fecaca";
+
+        status.innerHTML =
+            "Connection test failed.";
+    }
+}
+</script>
+
+</body>
+</html>

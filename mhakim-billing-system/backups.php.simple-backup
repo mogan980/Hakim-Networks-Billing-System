@@ -1,0 +1,43 @@
+<?php
+$logFile = "/var/www/html/mhakim-billing-system/backup_router.log";
+$message = "";
+
+if (isset($_POST["run_backup"])) {
+    $output = shell_exec("/usr/bin/php /var/www/html/mhakim-billing-system/backup_router.php 2>&1");
+    $message = $output ?: "Backup command executed.";
+}
+
+$logs = file_exists($logFile) ? array_reverse(array_slice(file($logFile), -30)) : [];
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Router Backups</title>
+<style>
+body{font-family:Arial;background:#f1f5f9;margin:0}
+.main{padding:30px}
+.card{background:white;padding:22px;border-radius:18px;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+button{padding:12px 18px;border:0;border-radius:10px;background:#16a34a;color:white;font-weight:bold}
+.log{background:#020617;color:#d1fae5;padding:15px;border-radius:12px;white-space:pre-wrap;font-family:monospace}
+</style>
+</head>
+<body>
+<div class="main">
+<h1>Router Backups</h1>
+
+<div class="card">
+<form method="POST">
+<button name="run_backup" value="1">Run Backup Now</button>
+</form>
+<?php if($message): ?><p><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
+</div>
+
+<div class="card">
+<h2>Latest Backup Logs</h2>
+<div class="log"><?php echo htmlspecialchars(implode("", $logs)); ?></div>
+</div>
+
+<a href="noc_final_clean.php">← Back to Dashboard</a>
+</div>
+</body>
+</html>

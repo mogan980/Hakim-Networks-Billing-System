@@ -1,0 +1,44 @@
+<?php
+require_once __DIR__."/hotspot_core.php";
+
+$raw=file_get_contents("php://input");
+file_put_contents(__DIR__."/mpesa_callback.log",$raw.PHP_EOL,FILE_APPEND);
+
+$data=json_decode($raw,true);
+$stk=$data["Body"]["stkCallback"] ?? null;
+
+if(!$stk){
+    http_response_code(200);
+    exit("OK");
+}
+
+$checkout=$stk["CheckoutRequestID"] ?? "";
+$result=(int)($stk["ResultCode"] ?? 1);
+
+if(!$checkout){
+    http_response_code(200);
+    exit("OK");
+}
+
+if($result !== 0){
+    $st=$pdo->prepare("UPDATE payments SET status='failed' WHERE checkout_id=?");
+    $st->execute([$checkout]);
+    http_response_code(200);
+    exit("OK");
+}
+
+$receipt="PAID-".$checkout;
+$phone="";
+$amount=0;
+
+foreach(($stk["CallbackMetadata"]["Item"] ?? []) as $i){
+    if(($i["Name"] ?? "")==="MpesaReceiptNumber"){$receipt=$i["Value"] ?? $receipt;}
+    if(($i["Name"] ?? "")==="PhoneNumber"){$phone=$i["Value"] ?? "";}
+    if(($i["Name"] ?? "")==="Amount"){$amount=$i["Value"] ?? 0;}
+}
+
+$st=$pdo->prepare("UPDATE payments SET status='paid', mpesa_receipt=?, phone=COALESCE(NULLIF(phone,''),?) WHERE checkout_id=?");
+$st->execute([$receipt,$phone,$checkout]);
+
+http_response_code(200);
+echo "OK";

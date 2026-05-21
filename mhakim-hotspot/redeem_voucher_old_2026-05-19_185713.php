@@ -1,0 +1,279 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-hotspot/config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$errorLog = __DIR__ . "/voucher_queue_error.log";
+
+function logErr($msg){
+    global $errorLog;
+    file_put_contents($errorLog, "[" . date("Y-m-d H:i:s") . "] " . $msg . PHP_EOL, FILE_APPEND);
+}
+
+function normalizeSpeed($speed){
+    $speed = trim((string)$speed);
+    if ($speed === "") return "6M";
+    if (preg_match('/^\d+$/', $speed)) return $speed . "M";
+    return $speed;
+}
+
+try {
+
+    $code = strtoupper(trim($_POST["voucher_code"] ?? ""));
+    $clientIp = $_SERVER["REMOTE_ADDR"] ?? "";
+
+    if (!$code) {
+        throw new Exception("Voucher code missing.");
+    }
+
+    if (!$clientIp) {
+        throw new Exception("Client IP missing.");
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT vouchers.*, packages.name AS package_name, packages.duration_hours, packages.speed_down, packages.speed_up, packages.price
+        FROM vouchers
+        LEFT JOIN packages ON vouchers.package_id = packages.id
+        WHERE vouchers.code = ? OR vouchers.voucher_code = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$code, $code]);
+    $voucher = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$voucher) {
+        throw new Exception("Invalid voucher.");
+    }
+
+    if ($voucher["status"] === "used") {
+        throw new Exception("Voucher already used.");
+    }
+
+    $durationHours = (float)$voucher["duration_hours"];
+    if ($durationHours <= 0) {
+        $durationHours = 1;
+    }
+
+    $down = normalizeSpeed($voucher["speed_down"] ?? "6M");
+    $up   = normalizeSpeed($voucher["speed_up"] ?? "2M");
+
+    // Force voucher speeds to 6M/2M unless package is monthly
+    $packageName = strtolower($voucher["package_name"] ?? "");
+
+    if (strpos($packageName, "monthly") === false) {
+        $down = "6M";
+        $up = "2M";
+    }
+
+    $maxLimit = $down . "/" . $up;
+    $expiresAt = date("Y-m-d H:i:s", strtotime("+" . $durationHours . " hours"));
+
+    $settings = $pdo->query("
+        SELECT * FROM mikrotik_settings
+        ORDER BY id DESC
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if (!$settings) {
+        throw new Exception("MikroTik settings missing.");
+    }
+
+    $api = new Client(new Config([
+        "host" => $settings["router_ip"],
+        "user" => $settings["router_username"],
+        "pass" => $settings["router_password"],
+        "port" => (int)$settings["api_port"],
+    ]));
+
+    /*
+     * 1. Create/update Hotspot user profile
+     */
+    $profileName = "VOUCHER-" . $down . "-" . $up;
+
+    $profileFound = $api->query(
+        (new Query("/ip/hotspot/user/profile/print"))
+            ->where("name", $profileName)
+    )->read();
+
+    if (!empty($profileFound)) {
+        $api->query(
+            (new Query("/ip/hotspot/user/profile/set"))
+                ->equal(".id", $profileFound[0][".id"])
+                ->equal("rate-limit", $maxLimit)
+                ->equal("shared-users", "1")
+        )->read();
+    } else {
+        $api->query(
+            (new Query("/ip/hotspot/user/profile/add"))
+                ->equal("name", $profileName)
+                ->equal("rate-limit", $maxLimit)
+                ->equal("shared-users", "1")
+        )->read();
+    }
+
+    /*
+     * 2. Create/update Hotspot user
+     */
+    $userFound = $api->query(
+        (new Query("/ip/hotspot/user/print"))
+            ->where("name", $code)
+    )->read();
+
+    if (!empty($userFound)) {
+        $api->query(
+            (new Query("/ip/hotspot/user/set"))
+                ->equal(".id", $userFound[0][".id"])
+                ->equal("password", $code)
+                ->equal("profile", $profileName)
+                ->equal("disabled", "no")
+        )->read();
+    } else {
+        $api->query(
+            (new Query("/ip/hotspot/user/add"))
+                ->equal("name", $code)
+                ->equal("password", $code)
+                ->equal("profile", $profileName)
+                ->equal("comment", "voucher:" . $code)
+                ->equal("disabled", "no")
+        )->read();
+    }
+
+    /*
+     * 3. Create Simple Queue using CLIENT IP
+     * This is the permanent bandwidth fix.
+     */
+    $queueName = "VOUCHER-" . $code;
+
+    // Create/update Simple Queue using client IP
+$queueName = "VOUCHER-" . $code;
+$queueTarget = $clientIp . "/32";
+
+$queueFound = $api->query(
+    (new Query("/queue/simple/print"))
+        ->where("name", $queueName)
+)->read();
+
+if (!empty($queueFound)) {
+    $api->query(
+        (new Query("/queue/simple/set"))
+            ->equal(".id", $queueFound[0][".id"])
+            ->equal("target", $queueTarget)
+            ->equal("max-limit", $maxLimit)
+            ->equal("disabled", "no")
+    )->read();
+} else {
+    $api->query(
+        (new Query("/queue/simple/add"))
+            ->equal("name", $queueName)
+            ->equal("target", $queueTarget)
+            ->equal("max-limit", $maxLimit)
+            ->equal("comment", "voucher:" . $code)
+            ->equal("disabled", "no")
+    )->read();
+}
+    /*
+     * 4. Add hotspot IP binding bypass so internet starts immediately
+     */
+    $bindingFound = $api->query(
+        (new Query("/ip/hotspot/ip-binding/print"))
+            ->where("address", $clientIp)
+    )->read();
+
+    if (!empty($bindingFound)) {
+        $api->query(
+            (new Query("/ip/hotspot/ip-binding/set"))
+                ->equal(".id", $bindingFound[0][".id"])
+                ->equal("type", "bypassed")
+                ->equal("comment", "voucher:" . $code)
+                ->equal("disabled", "no")
+        )->read();
+    }
+ else {
+        $api->query(
+            (new Query("/ip/hotspot/ip-binding/add"))
+                ->equal("address", $clientIp)
+                ->equal("type", "bypassed")
+                ->equal("comment", "voucher:" . $code)
+                ->equal("disabled", "no")
+        )->read();
+    }
+
+    /*
+     * 5. Save to DB
+     */
+    $pdo->beginTransaction();
+
+    $updateVoucher = $pdo->prepare("
+        UPDATE vouchers
+        SET status='used'
+        WHERE id=?
+    ");
+    $updateVoucher->execute([$voucher["id"]]);
+
+    $saveClient = $pdo->prepare("
+        INSERT INTO clients
+        (full_name, phone, username, password, package_id, status, starts_at, expires_at, client_ip, connection_type)
+        VALUES ('Voucher User', '', ?, ?, ?, 'active', NOW(), ?, ?, 'hotspot')
+        ON DUPLICATE KEY UPDATE
+            package_id=VALUES(package_id),
+            status='active',
+            starts_at=NOW(),
+            expires_at=VALUES(expires_at),
+            client_ip=VALUES(client_ip),
+            connection_type='hotspot'
+    ");
+
+    $saveClient->execute([
+        $code,
+        $code,
+        $voucher["package_id"],
+        $expiresAt,
+        $clientIp
+    ]);
+
+    $pdo->commit();
+
+    echo "
+    <html>
+    <head>
+        <meta http-equiv='refresh' content='3;url=http://neverssl.com'>
+        <style>
+            body{font-family:Arial;background:#052e2b;color:white;text-align:center;padding-top:80px}
+            .box{max-width:420px;margin:auto;background:#123;padding:30px;border-radius:20px}
+            h1{color:#22c55e}
+        </style>
+    </head>
+    <body>
+        <div class='box'>
+            <h1>Voucher Activated ✅</h1>
+            <p>Your internet is active.</p>
+            <p>Speed: {$maxLimit}</p>
+            <p>Expires: {$expiresAt}</p>
+            <p>Redirecting...</p>
+        </div>
+    </body>
+    </html>
+    ";
+
+} catch (Exception $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    logErr($e->getMessage());
+
+    echo "
+    <html>
+    <body style='font-family:Arial;background:#450a0a;color:white;text-align:center;padding-top:80px'>
+        <h1>Voucher Activation Failed</h1>
+        <p>" . htmlspecialchars($e->getMessage()) . "</p>
+        <a style='color:#fff' href='index.php'>Go Back</a>
+    </body>
+    </html>
+    ";
+}

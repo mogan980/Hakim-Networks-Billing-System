@@ -1,0 +1,179 @@
+<?php
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$checkoutId = $_GET["checkout_id"] ?? "";
+
+if(!$checkoutId){
+    die("Missing checkout ID");
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Processing Payment - Hakim Networks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:linear-gradient(135deg,#020617,#052e2b,#064e3b);
+    color:white;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.box{
+    width:92%;
+    max-width:430px;
+    background:#0f172a;
+    padding:32px;
+    border-radius:24px;
+    text-align:center;
+    box-shadow:0 25px 70px rgba(0,0,0,.45);
+}
+.loader{
+    width:72px;
+    height:72px;
+    border-radius:50%;
+    border:7px solid rgba(255,255,255,.15);
+    border-top-color:#22c55e;
+    margin:0 auto 25px;
+    animation:spin 1s linear infinite;
+}
+@keyframes spin{
+    to{transform:rotate(360deg)}
+}
+h1{
+    color:#22c55e;
+    margin-bottom:10px;
+}
+.status{
+    margin-top:16px;
+    padding:12px;
+    background:#020617;
+    border-radius:12px;
+    color:#cbd5e1;
+}
+.btn{
+    display:none;
+    margin-top:18px;
+    padding:13px 18px;
+    background:#22c55e;
+    color:#052e16;
+    border:0;
+    border-radius:12px;
+    font-weight:bold;
+    text-decoration:none;
+}
+small{
+    display:block;
+    margin-top:18px;
+    color:#94a3b8;
+    word-break:break-all;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+    <div class="loader" id="loader"></div>
+
+    <h1 id="title">Waiting for Payment</h1>
+
+    <p id="message">
+        Enter your M-Pesa PIN on your phone. Internet will activate automatically.
+    </p>
+
+    <div class="status" id="statusBox">
+        Checking payment status...
+    </div>
+
+    <form id="loginForm" method="post" action="http://login.hakim/login" style="display:none;">
+        <input type="hidden" name="username" id="loginUsername">
+        <input type="hidden" name="password" id="loginPassword">
+        <input type="hidden" name="dst" value="http://neverssl.com">
+    </form>
+
+    <button class="btn" id="manualBtn" onclick="document.getElementById('loginForm').submit();">
+        Continue to Internet
+    </button>
+
+    <small>
+        Checkout: <?php echo htmlspecialchars($checkoutId); ?>
+    </small>
+</div>
+
+<script>
+let attempts = 0;
+
+async function checkPayment(){
+
+    attempts++;
+
+    try{
+
+        const response = await fetch(
+            "check_payment.php?checkout_id=<?php echo urlencode($checkoutId); ?>&t=" + Date.now(),
+            {cache:"no-store"}
+        );
+
+        const data = await response.json();
+
+        if(data.status === "paid"){
+
+            document.getElementById("loader").style.display = "none";
+            document.getElementById("title").innerText = "Payment Successful";
+            document.getElementById("message").innerText = "Logging you in automatically...";
+            document.getElementById("statusBox").innerText = "Activating your internet...";
+            document.getElementById("manualBtn").style.display = "inline-block";
+
+            document.getElementById("loginUsername").value = data.username || "";
+            document.getElementById("loginPassword").value = data.password || "";
+
+            if(data.login_url){
+                document.getElementById("loginForm").action = data.login_url;
+            }
+
+            setTimeout(function(){
+                document.getElementById("loginForm").submit();
+            }, 1200);
+
+            return;
+        }
+
+        if(data.status === "failed"){
+
+            document.getElementById("loader").style.display = "none";
+            document.getElementById("title").innerText = "Payment Failed";
+            document.getElementById("message").innerText = "Payment was cancelled or timed out.";
+            document.getElementById("statusBox").innerText = "Returning to packages...";
+
+            setTimeout(function(){
+                window.location.href = "index.php";
+            }, 3000);
+
+            return;
+        }
+
+        document.getElementById("statusBox").innerText =
+            "Waiting for M-Pesa confirmation... (" + attempts + ")";
+
+    }catch(error){
+
+        document.getElementById("statusBox").innerText =
+            "Connection issue. Retrying... (" + attempts + ")";
+    }
+}
+
+checkPayment();
+setInterval(checkPayment, 3000);
+</script>
+
+</body>
+</html>

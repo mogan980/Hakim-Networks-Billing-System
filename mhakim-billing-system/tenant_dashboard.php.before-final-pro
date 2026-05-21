@@ -1,0 +1,218 @@
+<?php
+require_once __DIR__ . "/access_guard.php";
+require_once __DIR__ . "/config/database.php";
+
+if (($_SESSION["tenant_role"] ?? "") === "super_admin") {
+    header("Location: noc_final_clean.php");
+    exit;
+}
+
+$companyId = $_SESSION["tenant_company_id"];
+
+function one($pdo,$sql,$id){
+    $s=$pdo->prepare($sql);
+    $s->execute([$id]);
+    return $s->fetchColumn();
+}
+
+$clients = one($pdo,"SELECT COUNT(*) FROM clients WHERE company_id=?",$companyId);
+$packages = one($pdo,"SELECT COUNT(*) FROM packages WHERE company_id=?",$companyId);
+$vouchers = one($pdo,"SELECT COUNT(*) FROM vouchers WHERE company_id=?",$companyId);
+$revenue = one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE company_id=? AND status='paid'",$companyId);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Tenant Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+.pro-row{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;margin-top:24px}
+.progress{height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;margin-top:8px}
+.progress span{display:block;height:100%;background:#22c55e;border-radius:99px}
+.info-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(148,163,184,.14);padding:13px 0;color:#cbd5e1}
+.live-dot{width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:7px;box-shadow:0 0 18px #22c55e}
+.chart-box{height:260px;display:flex;align-items:center;justify-content:center;color:#94a3b8;background:rgba(2,6,23,.35);border-radius:18px;border:1px dashed rgba(148,163,184,.2)}
+.footer-pro{margin-top:34px;background:#052e2b;padding:34px;border-radius:28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px}
+.footer-pro h3{color:#22c55e;margin-top:0}
+.footer-pro a,.footer-pro p{display:block;color:#cbd5e1;text-decoration:none;margin:8px 0}
+@media(max-width:900px){.pro-row{grid-template-columns:1fr}}
+</style>
+
+</head>
+<body>
+<?php include __DIR__ . "/tenant/tenant_layout.php"; ?>
+
+<div class="main">
+<div class="hero">
+<h1>My ISP Live Dashboard</h1>
+<p>Private workspace. Only your company data appears here.</p>
+</div>
+
+<div class="grid">
+<div class="card"><h3>Clients</h3><strong id="clients"><?php echo $clients; ?></strong></div>
+<div class="card"><h3>Packages</h3><strong id="packages"><?php echo $packages; ?></strong></div>
+<div class="card"><h3>Vouchers</h3><strong id="vouchers"><?php echo $vouchers; ?></strong></div>
+<div class="card"><h3>Revenue</h3><strong id="revenue">KES <?php echo number_format($revenue); ?></strong></div>
+</div>
+
+<div class="panel" style="margin-top:24px;">
+<h2>Quick Actions</h2>
+<a class="btn" href="tenant/tenant_packages.php">Manage Packages</a>
+<a class="btn" href="tenant/tenant_vouchers.php">Manage Vouchers</a>
+<a class="btn" href="tenant/tenant_clients.php">View Clients</a>
+<a class="btn" href="router_wizard.php">Connect Router</a>
+</div>
+
+<div class="grid">
+
+<div class="card">
+<h3>Router Status</h3>
+<strong id="router_status">Checking...</strong>
+</div>
+
+<div class="card">
+<h3>CPU Load</h3>
+<strong id="cpu_load">0%</strong>
+</div>
+
+<div class="card">
+<h3>Hotspot Users</h3>
+<strong id="hotspot_users">0</strong>
+</div>
+
+<div class="card">
+<h3>Simple Queues</h3>
+<strong id="queues">0</strong>
+</div>
+
+</div>
+
+<div class="panel" style="margin-top:24px;">
+<h2>Router Health</h2>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;">
+
+<div class="card">
+<h3>Router Identity</h3>
+<strong id="router_name_live">-</strong>
+</div>
+
+<div class="card">
+<h3>Board</h3>
+<strong id="board_live">-</strong>
+</div>
+
+<div class="card">
+<h3>Uptime</h3>
+<strong id="uptime_live">-</strong>
+</div>
+
+<div class="card">
+<h3>Free Memory</h3>
+<strong id="memory_live">-</strong>
+</div>
+
+</div>
+
+<div style="margin-top:18px;color:#94a3b8;">
+Last sync:
+<span id="updated_live">-</span>
+</div>
+
+</div>
+
+
+<script>
+async function refreshTenant(){
+    try{
+        const r = await fetch("tenant/tenant_live.php?t="+Date.now(), {cache:"no-store"});
+        const d = await r.json();
+        document.getElementById("clients").innerText=d.clients;
+        document.getElementById("packages").innerText=d.packages;
+        document.getElementById("vouchers").innerText=d.vouchers;
+        document.getElementById("revenue").innerText="KES "+Number(d.total_revenue).toLocaleString();
+    }catch(e){}
+}
+setInterval(refreshTenant,10000);
+
+async function loadRouterLive(){
+
+    try{
+
+        const r = await fetch("tenant/tenant_router_live.php?t="+Date.now(),{
+            cache:"no-store"
+        });
+
+        const d = await r.json();
+
+        document.getElementById("router_status").innerText =
+            d.status === "online" ? "ONLINE" : "OFFLINE";
+
+        document.getElementById("cpu_load").innerText =
+            (d.cpu_load || 0) + "%";
+
+        document.getElementById("hotspot_users").innerText =
+            d.active_hotspot_users || 0;
+
+        document.getElementById("queues").innerText =
+            d.simple_queues || 0;
+
+        document.getElementById("router_name_live").innerText =
+            d.router_name || "-";
+
+        document.getElementById("board_live").innerText =
+            d.board || "-";
+
+        document.getElementById("uptime_live").innerText =
+            d.uptime || "-";
+
+        document.getElementById("memory_live").innerText =
+            d.free_memory || "-";
+
+        document.getElementById("updated_live").innerText =
+            d.updated_at || "-";
+
+    }catch(e){
+        console.log(e);
+    }
+}
+
+loadRouterLive();
+
+setInterval(loadRouterLive, 10000);
+
+</script>
+
+<script>
+async function upgradeTenantOps(){
+    try{
+        const r = await fetch("/mhakim-billing-system/tenant/tenant_router_live.php?t="+Date.now(), {cache:"no-store"});
+        const d = await r.json();
+
+        const online = d.status === "online";
+
+        const set = (id,val)=>{const e=document.getElementById(id); if(e) e.innerText=val;};
+
+        set("op_gateway", online ? "Online" : "Offline");
+        set("op_api", online ? "Connected" : "Pending");
+        set("op_hotspot", d.active_hotspot_users || 0);
+        set("op_queues", d.simple_queues || 0);
+        set("op_identity", d.router_name || "-");
+        set("op_cpu", (d.cpu_load || 0) + "%");
+
+        set("wan_rx", online ? "Monitoring" : "-");
+        set("wan_tx", online ? "Monitoring" : "-");
+
+        set("perf_vouchers", document.getElementById("vouchers")?.innerText || 0);
+        set("perf_unused", document.getElementById("unused_vouchers")?.innerText || 0);
+        set("perf_used", "-");
+
+    }catch(e){}
+}
+upgradeTenantOps();
+setInterval(upgradeTenantOps,10000);
+</script>
+
+</body>
+</html>

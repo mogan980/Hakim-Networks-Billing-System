@@ -1,0 +1,132 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+$package_id = $_POST["package_id"] ?? null;
+$phone = trim($_POST["phone"] ?? "");
+$client_ip = $_SERVER["REMOTE_ADDR"] ?? "";
+
+if (!$package_id || !$phone) die("Package or phone missing");
+
+$pkg = $pdo->prepare("SELECT * FROM packages WHERE id=? LIMIT 1");
+$pkg->execute([$package_id]);
+$package = $pkg->fetch(PDO::FETCH_ASSOC);
+if (!$package) die("Invalid package");
+
+$phone254 = preg_replace('/^0/', '254', $phone);
+$username = $phone;
+$password = substr($phone, -4);
+
+$mpesa = $pdo->query("SELECT * FROM mpesa_settings WHERE status='active' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if (!$mpesa) die("M-Pesa settings missing");
+
+$credentials = base64_encode(trim($mpesa["consumer_key"]) . ":" . trim($mpesa["consumer_secret"]));
+
+$ch = curl_init();
+curl_setopt_array($ch, [
+    CURLOPT_URL => "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+    CURLOPT_HTTPHEADER => [
+        "Authorization: Basic " . $credentials,
+        "Accept: application/json",
+        "Cache-Control: no-cache"
+    ],
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+    CURLOPT_USERAGENT => "Mozilla/5.0 M-Hakim-Billing-System",
+    CURLOPT_TIMEOUT => 30,
+]);
+
+$tokenRaw = curl_exec($ch);
+curl_close($ch);
+
+$tokenData = json_decode($tokenRaw, true);
+$accessToken = $tokenData["access_token"] ?? null;
+
+if (!$accessToken) {
+    die("M-Pesa token failed. Try again.");
+}
+
+$timestamp = date("YmdHis");
+$shortcode = trim($mpesa["shortcode"]);
+$passkey = trim($mpesa["passkey"]);
+$darajaPassword = base64_encode($shortcode . $passkey . $timestamp);
+
+$stkData = [
+    "BusinessShortCode" => $shortcode,
+    "Password" => $darajaPassword,
+    "Timestamp" => $timestamp,
+    "TransactionType" => "CustomerPayBillOnline",
+    "Amount" => (int)$package["price"],
+    "PartyA" => $phone254,
+    "PartyB" => $shortcode,
+    "PhoneNumber" => $phone254,
+    "CallBackURL" => trim($mpesa["callback_url"]),
+    "AccountReference" => "MHAKIM-" . $package["id"],
+    "TransactionDesc" => "M.Hakim Internet " . $package["name"]
+];
+
+$ch = curl_init("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest");
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    "Content-Type: application/json",
+    "Authorization: Bearer " . $accessToken
+]);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($stkData));
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+$stkRaw = curl_exec($ch);
+curl_close($ch);
+
+$stk = json_decode($stkRaw, true);
+
+if (isset($responseData["CheckoutRequestID"])) {
+    $checkoutId = $responseData["CheckoutRequestID"];
+
+    header("Location: wait_payment.php?checkout_id=" . urlencode($checkoutId));
+    exit;
+}
+
+$checkoutId = $stk["CheckoutRequestID"];
+
+$pdo->beginTransaction();
+
+$check = $pdo->prepare("SELECT id FROM clients WHERE username=? LIMIT 1");
+$check->execute([$username]);
+$client = $check->fetch(PDO::FETCH_ASSOC);
+
+if ($client) {
+    $client_id = $client["id"];
+
+    $pdo->prepare("
+        UPDATE clients
+        SET phone=?, password=?, package_id=?, status='pending', client_ip=?
+        WHERE id=?
+    ")->execute([$phone, $password, $package_id, $client_ip, $client_id]);
+} else {
+    $pdo->prepare("
+        INSERT INTO clients(full_name, phone, username, password, package_id, status, client_ip)
+        VALUES('Hotspot Client', ?, ?, ?, ?, 'pending', ?)
+    ")->execute([$phone, $username, $password, $package_id, $client_ip]);
+
+    $client_id = $pdo->lastInsertId();
+}
+
+$pdo->prepare("
+    INSERT INTO payments(client_id, package_id, amount, method, reference, checkout_id, phone, client_ip, status)
+    VALUES (?, ?, ?, 'mpesa', ?, ?, ?, ?, 'pending')
+")->execute([
+    $client_id,
+    $package_id,
+    $package["price"],
+    $checkoutId,
+    $checkoutId,
+    $phone254,
+    $client_ip
+]);
+
+$pdo->commit();
+header("Location: wait_payment.php?checkout_id=" . urlencode($checkoutId));
+exit;
+
+header("Location: wait_payment.php?checkout_id=" . urlencode($checkoutId));
+exit;

@@ -1,0 +1,74 @@
+<?php
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$checkoutId = $_GET["checkout_id"] ?? "";
+if (!$checkoutId) die("Missing checkout ID");
+
+$url = "http://localhost/mhakim-hotspot/check_payment.php?checkout_id=" . urlencode($checkoutId) . "&t=" . time();
+$response = @file_get_contents($url);
+$data = json_decode($response, true);
+
+$status = $data["status"] ?? "pending";
+$username = $data["username"] ?? "";
+$password = $data["password"] ?? "";
+$loginUrl = $data["login_url"] ?? "http://login.hakim/login";
+$dst = "http://neverssl.com";
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Payment Status</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<?php if($status !== "paid" && $status !== "failed"): ?>
+<meta http-equiv="refresh" content="3">
+<?php endif; ?>
+
+<style>
+body{margin:0;font-family:Arial;background:linear-gradient(135deg,#020617,#052e2b,#064e3b);color:white;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.box{width:92%;max-width:430px;background:#0f172a;padding:32px;border-radius:24px;text-align:center;box-shadow:0 25px 70px rgba(0,0,0,.45)}
+.loader{width:70px;height:70px;border-radius:50%;border:7px solid rgba(255,255,255,.15);border-top-color:#22c55e;margin:0 auto 25px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{color:#22c55e}
+.btn{display:inline-block;margin-top:18px;padding:14px 20px;background:#22c55e;color:#052e16;border:0;border-radius:12px;font-weight:bold;font-size:16px}
+</style>
+</head>
+
+<body <?php if($status === "paid" && $username && $password): ?>onload="document.getElementById('loginForm').submit();"<?php endif; ?>>
+
+<div class="box">
+
+<?php if($status === "paid" && $username && $password): ?>
+
+    <h1>Payment Successful ✅</h1>
+    <p>Logging you in automatically...</p>
+
+    <form id="loginForm" method="post" action="<?php echo htmlspecialchars($loginUrl); ?>">
+        <input type="hidden" name="username" value="<?php echo htmlspecialchars($username); ?>">
+        <input type="hidden" name="password" value="<?php echo htmlspecialchars($password); ?>">
+        <input type="hidden" name="dst" value="<?php echo htmlspecialchars($dst); ?>">
+        <button class="btn" type="submit">Continue to Internet</button>
+    </form>
+
+<?php elseif($status === "failed"): ?>
+
+    <h1>Payment Failed</h1>
+    <p>Payment was cancelled or timed out.</p>
+    <a class="btn" href="index.php">Try Again</a>
+
+<?php else: ?>
+
+    <div class="loader"></div>
+    <h1>Waiting for Payment</h1>
+    <p>Enter your M-Pesa PIN on your phone.</p>
+    <p>Checking again automatically...</p>
+    <small><?php echo htmlspecialchars($checkoutId); ?></small>
+
+<?php endif; ?>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$router = $pdo->query("SELECT * FROM super_admin_router LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+
+if(!$router){
+    die("Router not configured");
+}
+
+
+function writeLog($file, $msg){
+    file_put_contents(
+        __DIR__ . "/" . $file,
+        "[" . date("Y-m-d H:i:s") . "] " . $msg . PHP_EOL,
+        FILE_APPEND
+    );
+}
+
+function speedValue($speed, $fallback){
+    $speed = trim((string)$speed);
+    if ($speed === "") return $fallback;
+    if (preg_match('/^\d+$/', $speed)) return $speed . "M";
+    return $speed;
+}
+
+try {
+
+    $raw = file_get_contents("php://input");
+    writeLog("mpesa_callback.log", $raw);
+
+    $data = json_decode($raw, true);
+
+    if (!isset($data["Body"]["stkCallback"])) {
+        throw new Exception("Invalid callback data");
+    }
+
+    $stk = $data["Body"]["stkCallback"];
+
+    $checkoutId = $stk["CheckoutRequestID"] ?? "";
+    $resultCode = (int)($stk["ResultCode"] ?? 999);
+    $resultDesc = $stk["ResultDesc"] ?? "";
+
+    if (!$checkoutId) {
+        throw new Exception("Missing CheckoutRequestID");
+    }
+
+    if ($resultCode !== 0) {
+        $stmt = $pdo->prepare("
+            UPDATE payments
+            SET status='failed'
+            WHERE checkout_id=?
+        ");
+        $stmt->execute([$checkoutId]);
+
+        writeLog("mpesa_callback.log", "PAYMENT FAILED: {$checkoutId} {$resultDesc}");
+        echo json_encode(["ResultCode"=>0,"ResultDesc"=>"Accepted"]);
+        exit;
+    }
+
+    $items = $stk["CallbackMetadata"]["Item"] ?? [];
+
+    $amount = 0;
+    $receipt = "";
+    $phone = "";
+
+    foreach ($items as $item) {
+        if (($item["Name"] ?? "") === "Amount") {
+            $amount = $item["Value"] ?? 0;
+        }
+        if (($item["Name"] ?? "") === "MpesaReceiptNumber") {
+            $receipt = $item["Value"] ?? "";
+        }
+        if (($item["Name"] ?? "") === "PhoneNumber") {
+            $phone = $item["Value"] ?? "";
+        }
+    }
+
+    $payStmt = $pdo->prepare("
+        UPDATE payments
+        SET status='paid',
+            mpesa_receipt=?,
+            phone=?
+        WHERE checkout_id=?
+    ");
+    $payStmt->execute([$receipt, $phone, $checkoutId]);
+
+    $payment = $pdo->prepare("
+        SELECT *
+        FROM payments
+        WHERE checkout_id=?
+        LIMIT 1
+    ");
+    $payment->execute([$checkoutId]);
+    $paymentRow = $payment->fetch(PDO::FETCH_ASSOC);
+
+    if (!$paymentRow) {
+        throw new Exception("Payment row not found after update");
+    }
+
+    /*
+     * Find matching client by phone
+     */
+    $clientStmt = $pdo->prepare("
+        SELECT clients.*, packages.speed_down, packages.speed_up, packages.duration_hours, packages.name AS package_name
+        FROM clients
+        LEFT JOIN packages ON clients.package_id = packages.id
+        WHERE clients.phone=? OR clients.username=?
+        ORDER BY clients.id DESC
+        LIMIT 1
+    ");
+    $clientStmt->execute([$phone, $phone]);
+    $client = $clientStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$client) {
+        throw new Exception("Client not found for phone {$phone}");
+    }
+
+    $durationHours = (float)($client["duration_hours"] ?? 1);
+    if ($durationHours <= 0) $durationHours = 1;
+
+    $expiresAt = date("Y-m-d H:i:s", strtotime("+{$durationHours} hours"));
+
+    $pdo->prepare("
+        UPDATE clients
+        SET status='active',
+            starts_at=NOW(),
+            expires_at=?,
+            connection_type='hotspot'
+        WHERE id=?
+    ")->execute([$expiresAt, $client["id"]]);
+
+    /*
+     * MikroTik activation
+     */
+    $settings = $pdo->query("
+        SELECT *
+        FROM mikrotik_settings
+        ORDER BY id DESC
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if (!$settings) {
+        throw new Exception("MikroTik settings missing");
+    }
+
+    $api = new Client(new Config([
+        "host" => $settings["router_ip"],
+        "user" => $settings["router_username"],
+        "pass" => $settings["router_password"],
+        "port" => (int)$settings["api_port"],
+        "timeout" => 5
+    ]));
+
+    $username = $client["username"];
+    $password = $client["password"];
+    $clientIp = $client["client_ip"];
+
+    /*
+     * If callback came through ngrok, REMOTE_ADDR is not client phone.
+     * So we trust the client_ip saved during STK push.
+     */
+    if (!$clientIp || $clientIp === "192.168.88.1") {
+        writeLog("mpesa_callback_error.log", "Invalid client IP for {$username}: {$clientIp}");
+    }
+
+    $down = speedValue($client["speed_down"] ?? "", "6M");
+    $up = speedValue($client["speed_up"] ?? "", "2M");
+    $maxLimit = $down . "/" . $up;
+
+    /*
+     * Hotspot user
+     */
+    $profileName = "PAYMENT-" . $down . "-" . $up;
+
+    $profile = $api->query(
+        (new Query("/ip/hotspot/user/profile/print"))
+            ->where("name", $profileName)
+    )->read();
+
+    if (empty($profile)) {
+        $api->query(
+            (new Query("/ip/hotspot/user/profile/add"))
+                ->equal("name", $profileName)
+                ->equal("rate-limit", $maxLimit)
+                ->equal("shared-users", "1")
+        )->read();
+    }
+
+    $hotspotUser = $api->query(
+        (new Query("/ip/hotspot/user/print"))
+            ->where("name", $username)
+    )->read();
+
+    if (empty($hotspotUser)) {
+        $api->query(
+            (new Query("/ip/hotspot/user/add"))
+                ->equal("name", $username)
+                ->equal("password", $password)
+                ->equal("profile", $profileName)
+                ->equal("comment", "mpesa:" . $receipt)
+                ->equal("disabled", "no")
+        )->read();
+    } else {
+        $api->query(
+            (new Query("/ip/hotspot/user/set"))
+                ->equal(".id", $hotspotUser[0][".id"])
+                ->equal("password", $password)
+                ->equal("profile", $profileName)
+                ->equal("disabled", "no")
+        )->read();
+    }
+
+    /*
+     * Queue sync target
+     */
+    if ($clientIp && $clientIp !== "192.168.88.1") {
+
+        $queueName = "CLIENT-" . $username;
+        $queue = $api->query(
+            (new Query("/queue/simple/print"))
+                ->where("name", $queueName)
+        )->read();
+
+        if (empty($queue)) {
+            $api->query(
+                (new Query("/queue/simple/add"))
+                    ->equal("name", $queueName)
+                    ->equal("target", $clientIp . "/32")
+                    ->equal("max-limit", $maxLimit)
+                    ->equal("comment", "mpesa:" . $receipt)
+                    ->equal("disabled", "no")
+            )->read();
+        } else {
+            $api->query(
+                (new Query("/queue/simple/set"))
+                    ->equal(".id", $queue[0][".id"])
+                    ->equal("target", $clientIp . "/32")
+                    ->equal("max-limit", $maxLimit)
+                    ->equal("disabled", "no")
+            )->read();
+        }
+    }
+
+    writeLog("mpesa_callback.log", "PAYMENT ACTIVATED SUCCESSFULLY: {$checkoutId} {$receipt}");
+
+    echo json_encode(["ResultCode"=>0,"ResultDesc"=>"Accepted"]);
+
+} catch (Exception $e) {
+
+    writeLog("mpesa_callback_error.log", $e->getMessage());
+
+    echo json_encode(["ResultCode"=>0,"ResultDesc"=>"Accepted"]);
+}

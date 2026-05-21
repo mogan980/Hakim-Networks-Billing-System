@@ -1,0 +1,35 @@
+<?php
+header("Content-Type: application/json");
+require_once __DIR__ . "/config/database.php";
+require_once __DIR__ . "/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+try {
+    $router = $pdo->query("SELECT * FROM routers WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if(!$router) throw new Exception("No active router found");
+
+    $client = new Client(new Config([
+        "host"=>$router["router_ip"],
+        "user"=>$router["router_username"],
+        "pass"=>$router["router_password"],
+        "port"=>(int)$router["api_port"],
+        "timeout"=>5
+    ]));
+
+    $interfaces = $client->query(new Query("/interface/print"))->read();
+
+    echo json_encode([
+        "ok"=>true,
+        "count"=>count($interfaces),
+        "interfaces"=>$interfaces
+    ]);
+
+} catch(Exception $e) {
+    echo json_encode([
+        "ok"=>false,
+        "error"=>$e->getMessage()
+    ]);
+}

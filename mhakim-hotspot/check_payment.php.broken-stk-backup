@@ -1,0 +1,38 @@
+<?php
+require_once __DIR__."/hotspot_core.php";
+
+$checkout=$_GET["checkout_id"] ?? "";
+if(!$checkout){out_json(["status"=>"missing"]);}
+
+try{
+    $st=$pdo->prepare("SELECT * FROM payments WHERE checkout_id=? LIMIT 1");
+    $st->execute([$checkout]);
+    $pay=$st->fetch(PDO::FETCH_ASSOC);
+
+    if(!$pay){out_json(["status"=>"pending"]);}
+    if($pay["status"]==="failed"){out_json(["status"=>"failed"]);}
+    if($pay["status"]!=="paid"){out_json(["status"=>"pending"]);}
+
+    $phone=preg_replace("/[^0-9]/","",$pay["phone"] ?? "");
+    if(!$phone){out_json(["status"=>"error","message"=>"Phone missing"]);}
+
+    $pass=substr($phone,-4);
+
+    $login=activate_hotspot(
+        $phone,
+        $pass,
+        $pay["package_id"] ?? null,
+        "mpesa:".$checkout
+    );
+
+    out_json([
+        "status"=>"paid",
+        "username"=>$login["username"],
+        "password"=>$login["password"],
+        "login_url"=>$login["login_url"],
+        "dst"=>$login["dst"]
+    ]);
+
+}catch(Exception $e){
+    out_json(["status"=>"error","message"=>$e->getMessage()]);
+}

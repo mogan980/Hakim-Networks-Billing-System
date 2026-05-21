@@ -1,0 +1,181 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$router = $pdo->query("SELECT * FROM super_admin_router LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if(!$router){
+    die("Router not configured");
+}
+
+
+function logVoucher($msg){
+    file_put_contents(
+        __DIR__ . "/voucher_queue_error.log",
+        "[" . date("Y-m-d H:i:s") . "] " . $msg . PHP_EOL,
+        FILE_APPEND
+    );
+}
+
+function cleanSpeed($speed, $fallback){
+    $speed = trim((string)$speed);
+    if ($speed === "") return $fallback;
+    if (preg_match('/^\d+$/', $speed)) return $speed . "M";
+    return strtoupper($speed);
+}
+
+$code = strtoupper(trim($_POST["voucher_code"] ?? ""));
+
+if (!$code) {
+    header("Location: index.php?error=" . urlencode("Voucher code missing"));
+    exit;
+}
+
+try {
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            vouchers.*,
+            packages.name AS package_name,
+            packages.duration_hours,
+            packages.speed_down,
+            packages.speed_up
+        FROM vouchers
+        LEFT JOIN packages ON vouchers.package_id = packages.id
+        WHERE vouchers.code=?
+        LIMIT 1
+    ");
+    $stmt->execute([$code]);
+    $voucher = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$voucher) {
+        throw new Exception("Invalid voucher code.");
+    }
+
+    if ($voucher["status"] === "used") {
+        throw new Exception("This voucher has already been used.");
+    }
+
+    $durationHours = (float)($voucher["duration_hours"] ?? 1);
+    if ($durationHours <= 0) {
+        $durationHours = 1;
+    }
+
+    $expiresAt = date("Y-m-d H:i:s", strtotime("+{$durationHours} hours"));
+
+    $down = cleanSpeed($voucher["speed_down"] ?? "", "6M");
+    $up   = cleanSpeed($voucher["speed_up"] ?? "", "2M");
+    $maxLimit = $down . "/" . $up;
+
+    $username = $code;
+    $password = $code;
+
+    $settings = $pdo->query("
+        SELECT *
+        FROM mikrotik_settings
+        ORDER BY id DESC
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if (!$settings) {
+        throw new Exception("MikroTik settings missing.");
+    }
+
+    $api = new Client(new Config([
+        "host" => $router["router_ip"],
+        "user" => $router["router_user"],
+        "pass" => $router["router_pass"],
+        "port" => (int)$router["router_port"],
+        "timeout" => 5,
+        "attempts" => 1
+    ]));
+
+    $profileName = "VOUCHER-" . $down . "-" . $up;
+
+    $profile = $api->query(
+        (new Query("/ip/hotspot/user/profile/print"))
+            ->where("name", $profileName)
+    )->read();
+
+    if (empty($profile)) {
+        $api->query(
+            (new Query("/ip/hotspot/user/profile/add"))
+                ->equal("name", $profileName)
+                ->equal("rate-limit", $maxLimit)
+                ->equal("shared-users", "1")
+        )->read();
+    }
+
+    $user = $api->query(
+        (new Query("/ip/hotspot/user/print"))
+            ->where("name", $username)
+    )->read();
+
+    if (empty($user)) {
+        $api->query(
+            (new Query("/ip/hotspot/user/add"))
+                ->equal("name", $username)
+                ->equal("password", $password)
+                ->equal("profile", $profileName)
+                ->equal("comment", "voucher:" . $code)
+                ->equal("disabled", "no")
+        )->read();
+    } else {
+        $api->query(
+            (new Query("/ip/hotspot/user/set"))
+                ->equal(".id", $user[0][".id"])
+                ->equal("password", $password)
+                ->equal("profile", $profileName)
+                ->equal("disabled", "no")
+        )->read();
+    }
+
+    $pdo->beginTransaction();
+
+    $pdo->prepare("
+        UPDATE vouchers
+        SET status='used'
+        WHERE id=?
+    ")->execute([$voucher["id"]]);
+
+    $clientStmt = $pdo->prepare("
+        INSERT INTO clients
+        (full_name, phone, username, password, package_id, status, starts_at, expires_at, connection_type)
+        VALUES ('Voucher User', '', ?, ?, ?, 'active', NOW(), ?, 'hotspot')
+        ON DUPLICATE KEY UPDATE
+            password=VALUES(password),
+            package_id=VALUES(package_id),
+            status='active',
+            starts_at=NOW(),
+            expires_at=VALUES(expires_at),
+            connection_type='hotspot'
+    ");
+
+    $clientStmt->execute([
+        $username,
+        $password,
+        $voucher["package_id"],
+        $expiresAt
+    ]);
+
+    $pdo->commit();
+
+    header("Location: voucher_success.php?u=" . urlencode($username) . "&p=" . urlencode($password));
+    exit;
+
+} catch (Exception $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    logVoucher($e->getMessage());
+
+    header("Location: index.php?error=" . urlencode($e->getMessage()));
+    exit;
+}

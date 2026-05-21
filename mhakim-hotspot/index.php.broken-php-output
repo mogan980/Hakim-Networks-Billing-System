@@ -1,0 +1,642 @@
+
+<?php
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
+if (!empty($_GET["link-login-only"])) {
+    $_SESSION["mikrotik_login_url"] = $_GET["link-login-only"];
+}
+
+if (empty($_SESSION["mikrotik_login_url"])) {
+    $_SESSION["mikrotik_login_url"] = "http://192.168.88.1/login";
+}
+?>
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+date_default_timezone_set("Africa/Nairobi");
+
+$packages = $pdo->query("
+    SELECT *
+    FROM packages
+    WHERE status='active'
+    ORDER BY price ASC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+function safe($v){
+    return htmlspecialchars((string)$v, ENT_QUOTES, "UTF-8");
+}
+
+function speedLabel($down, $up){
+    return strtoupper(trim($down ?: "6M")) . " / " . strtoupper(trim($up ?: "2M"));
+}
+
+function packageBadge($price){
+    $price = (float)$price;
+    if($price >= 1000) return "MONTHLY";
+    if($price >= 250) return "WEEKLY";
+    if($price <= 20) return "QUICK";
+    return "POPULAR";
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Hakim Networks - Buy Internet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box}
+body{
+    margin:0;
+    min-height:100vh;
+    font-family:Arial,sans-serif;
+    color:white;
+    background:
+        radial-gradient(circle at top left,rgba(34,197,94,.26),transparent 35%),
+        radial-gradient(circle at bottom right,rgba(59,130,246,.22),transparent 35%),
+        linear-gradient(135deg,#020617,#052e2b,#071827);
+}
+.orb{
+    position:fixed;
+    width:280px;
+    height:280px;
+    border-radius:50%;
+    filter:blur(55px);
+    opacity:.5;
+    z-index:-1;
+    animation:float 8s ease-in-out infinite alternate;
+}
+.o1{background:#22c55e;top:20px;left:15px}
+.o2{background:#38bdf8;right:15px;bottom:20px;animation-delay:1.3s}
+@keyframes float{from{transform:translateY(0)}to{transform:translateY(35px)}}
+
+.container{
+    width:94%;
+    max-width:1180px;
+    margin:auto;
+    padding:24px 0 34px;
+}
+.topbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:16px;
+    margin-bottom:20px;
+}
+.brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+}
+.logo{
+    width:54px;
+    height:54px;
+    border-radius:18px;
+    display:grid;
+    place-items:center;
+    background:linear-gradient(135deg,#22c55e,#86efac);
+    color:#052e16;
+    font-size:28px;
+    font-weight:900;
+    box-shadow:0 18px 45px rgba(34,197,94,.32);
+}
+.brand h1{margin:0;font-size:24px}
+.brand small{color:#bbf7d0}
+.pill{
+    padding:11px 15px;
+    border-radius:999px;
+    background:rgba(15,23,42,.72);
+    border:1px solid rgba(34,197,94,.25);
+    color:#bbf7d0;
+    font-size:13px;
+    backdrop-filter:blur(14px);
+}
+.hero{
+    text-align:center;
+    padding:20px 10px 14px;
+}
+.hero h2{
+    margin:0;
+    font-size:42px;
+    line-height:1.08;
+}
+.hero p{
+    max-width:720px;
+    margin:13px auto 0;
+    color:#d1fae5;
+    line-height:1.6;
+}
+.notice{
+    margin:18px auto 0;
+    max-width:760px;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:12px;
+}
+.notice div{
+    background:rgba(15,23,42,.72);
+    border:1px solid rgba(148,163,184,.14);
+    border-radius:18px;
+    padding:14px;
+    color:#cbd5e1;
+}
+.notice strong{display:block;color:#22c55e;font-size:18px;margin-bottom:3px}
+
+.error{
+    margin:18px 0;
+    background:rgba(127,29,29,.9);
+    border:1px solid rgba(248,113,113,.35);
+    color:#fecaca;
+    padding:14px;
+    border-radius:16px;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(255px,1fr));
+    gap:18px;
+    margin-top:24px;
+}
+.card{
+    position:relative;
+    overflow:hidden;
+    background:rgba(15,23,42,.82);
+    border:1px solid rgba(148,163,184,.16);
+    border-radius:26px;
+    padding:22px;
+    box-shadow:0 25px 80px rgba(0,0,0,.35);
+    backdrop-filter:blur(18px);
+}
+.card:before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg,rgba(34,197,94,.13),transparent 45%);
+    pointer-events:none;
+}
+.card-inner{position:relative;z-index:1}
+.card-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+}
+.card h3{
+    margin:0;
+    font-size:22px;
+}
+.badge{
+    font-size:11px;
+    font-weight:900;
+    padding:7px 10px;
+    border-radius:999px;
+    background:linear-gradient(135deg,#22c55e,#86efac);
+    color:#052e16;
+}
+.price{
+    font-size:36px;
+    font-weight:900;
+    color:#22c55e;
+    margin:16px 0 12px;
+}
+.meta{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+}
+.tag{
+    padding:8px 10px;
+    border-radius:999px;
+    background:rgba(2,6,23,.64);
+    border:1px solid rgba(148,163,184,.16);
+    color:#cbd5e1;
+    font-size:12px;
+}
+input{
+    width:100%;
+    padding:14px;
+    border-radius:15px;
+    border:1px solid rgba(148,163,184,.22);
+    background:rgba(2,6,23,.76);
+    color:white;
+    outline:none;
+    margin-bottom:10px;
+}
+input:focus{
+    border-color:#22c55e;
+    box-shadow:0 0 0 3px rgba(34,197,94,.13);
+}
+button{
+    width:100%;
+    border:0;
+    padding:15px;
+    border-radius:16px;
+    background:linear-gradient(135deg,#22c55e,#86efac);
+    color:#052e16;
+    font-weight:900;
+    cursor:pointer;
+    font-size:15px;
+}
+button:hover{filter:brightness(1.06)}
+.voucher{
+    margin-top:24px;
+    background:rgba(15,23,42,.86);
+    border:1px solid rgba(34,197,94,.22);
+    border-radius:26px;
+    padding:24px;
+    box-shadow:0 25px 80px rgba(0,0,0,.32);
+}
+.voucher h2{margin:0 0 8px;color:#22c55e}
+.voucher p{color:#cbd5e1;margin-top:0}
+.help{
+    margin-top:18px;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:12px;
+}
+.help div{
+    background:rgba(2,6,23,.62);
+    border:1px solid rgba(148,163,184,.12);
+    border-radius:18px;
+    padding:14px;
+    color:#cbd5e1;
+}
+.footer{
+    text-align:center;
+    color:#94a3b8;
+    padding:24px 0 0;
+    font-size:13px;
+}
+.support{
+    position:fixed;
+    right:18px;
+    bottom:18px;
+    background:#22c55e;
+    color:#052e16;
+    text-decoration:none;
+    font-weight:900;
+    padding:13px 16px;
+    border-radius:999px;
+    box-shadow:0 18px 45px rgba(34,197,94,.35);
+}
+.features{
+    margin-top:38px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    gap:18px;
+}
+
+.feature-card{
+    background:rgba(15,23,42,.84);
+    border:1px solid rgba(148,163,184,.16);
+    border-radius:26px;
+    padding:24px;
+    box-shadow:0 25px 80px rgba(0,0,0,.28);
+    transition:.3s;
+    position:relative;
+    overflow:hidden;
+}
+
+.feature-card:hover{
+    transform:translateY(-5px);
+    border-color:rgba(34,197,94,.35);
+}
+
+.feature-card:before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg,rgba(34,197,94,.12),transparent 45%);
+    pointer-events:none;
+}
+
+.feature-icon{
+    width:62px;
+    height:62px;
+    border-radius:18px;
+    display:grid;
+    place-items:center;
+    background:linear-gradient(135deg,#22c55e,#86efac);
+    color:#052e16;
+    font-size:28px;
+    margin-bottom:18px;
+    font-weight:900;
+    box-shadow:0 18px 45px rgba(34,197,94,.25);
+}
+
+.feature-card h3{
+    margin:0 0 10px;
+    color:#fff;
+}
+
+.feature-card p{
+    color:#cbd5e1;
+    line-height:1.6;
+    margin:0;
+}
+
+.cta-section{
+    position:relative;
+    overflow:hidden;
+    margin-top:40px;
+    border-radius:34px;
+    background:
+        linear-gradient(135deg,#052e2b,#071827,#020617);
+    border:1px solid rgba(34,197,94,.2);
+    box-shadow:0 30px 100px rgba(0,0,0,.35);
+}
+
+.cta-overlay{
+    position:absolute;
+    inset:0;
+    background:
+        radial-gradient(circle at top right,rgba(34,197,94,.24),transparent 30%),
+        radial-gradient(circle at bottom left,rgba(59,130,246,.2),transparent 30%);
+}
+
+.cta-content{
+    position:relative;
+    z-index:1;
+    text-align:center;
+    padding:55px 25px;
+}
+
+.cta-content h2{
+    margin:0;
+    font-size:38px;
+    color:#22c55e;
+}
+
+.cta-content p{
+    max-width:760px;
+    margin:18px auto 0;
+    color:#d1fae5;
+    line-height:1.8;
+}
+
+.cta-stats{
+    margin-top:28px;
+    display:flex;
+    justify-content:center;
+    gap:22px;
+    flex-wrap:wrap;
+}
+
+.cta-stats div{
+    min-width:140px;
+    background:rgba(15,23,42,.58);
+    border:1px solid rgba(148,163,184,.14);
+    border-radius:22px;
+    padding:18px;
+}
+
+.cta-stats strong{
+    display:block;
+    font-size:30px;
+    color:#22c55e;
+}
+
+.cta-stats span{
+    color:#cbd5e1;
+    font-size:13px;
+}
+@media(max-width:760px){
+    .topbar{flex-direction:column;align-items:flex-start}
+    .hero h2{font-size:31px}
+    .notice,.help{grid-template-columns:1fr}
+    .support{left:18px;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<div class="orb o1"></div>
+<div class="orb o2"></div>
+
+<div class="container">
+
+    <div class="topbar">
+        <div class="brand">
+            <div class="logo">H</div>
+            <div>
+                <h1>Hakim Networks</h1>
+                <small>Fast • Secure • Reliable Internet</small>
+            </div>
+        </div>
+
+        <div class="pill">
+            ● Live Hotspot • Connected Devices: <span id="deviceCount">Syncing...</span>
+        </div>
+    </div>
+
+    <section class="hero">
+        <h2>Buy Internet Access Instantly</h2>
+        <p>Select your package, pay with M-Pesa STK Push, or redeem a voucher. Your device will be connected automatically after activation.</p>
+
+        <div class="notice">
+            <div><strong>Auto</strong> M-Pesa activation</div>
+            <div><strong>Secure</strong> Voucher login</div>
+            <div><strong>Fast</strong> MikroTik hotspot</div>
+        </div>
+    </section>
+
+    <?php if(isset($_GET["error"])): ?>
+        <div class="error"><?php echo safe($_GET["error"]); ?></div>
+    <?php endif; ?>
+
+    <div class="grid">
+        <?php foreach($packages as $package): ?>
+            <div class="card">
+                <div class="card-inner">
+                    <div class="card-head">
+                        <h3><?php echo safe($package["name"]); ?></h3>
+                        <span class="badge"><?php echo packageBadge($package["price"]); ?></span>
+                    </div>
+
+                    <div class="price">KES <?php echo number_format((float)$package["price"]); ?></div>
+
+                    <div class="meta">
+                        <span class="tag">⚡ <?php echo safe(speedLabel($package["speed_down"], $package["speed_up"])); ?></span>
+                        <span class="tag">⏱ <?php echo safe($package["duration_hours"]); ?> hrs</span>
+                    </div>
+
+                    <form method="POST" action="stk_push.php">
+                        <input type="hidden" name="client_ip" value="$(ip)">
+                        <input type="hidden" name="package_id" value="<?php echo (int)$package["id"]; ?>">
+                        <input type="text" name="phone" placeholder="M-Pesa number e.g. 0704467699" required>
+                        <button type="submit">Pay with M-Pesa</button>
+                    </form>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
+    <div class="voucher">
+        <h2>Have a Voucher?</h2>
+        <p>Enter your voucher code below to activate internet instantly.</p>
+
+        <form method="POST" action="redeem_voucher.php">
+            <input type="hidden" name="client_ip" value="$(ip)">
+            <input type="text" name="voucher_code" placeholder="Enter voucher code" required>
+            <button type="submit">Activate Voucher</button>
+        </form>
+
+        <div class="help">
+            <div>✅ Keep this page open after M-Pesa PIN</div>
+            <div>📞 Support: 0704467699</div>
+            <div>🔒 Secure hotspot login</div>
+        </div>
+    </div>
+<section class="features">
+    <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Ultra Fast Speeds</h3>
+        <p>Optimized MikroTik bandwidth management for stable browsing, streaming and gaming.</p>
+    </div>
+
+    <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>Secure Network</h3>
+        <p>Protected hotspot authentication with automated voucher and M-Pesa activation.</p>
+    </div>
+
+    <div class="feature-card">
+        <div class="feature-icon">📡</div>
+        <h3>Reliable Coverage</h3>
+        <p>Strong wireless connectivity powered by Hakim Networks infrastructure.</p>
+    </div>
+</section>
+
+<section class="cta-section">
+    <div class="cta-overlay"></div>
+
+    <div class="cta-content">
+        <h2>Experience Premium Internet Access</h2>
+        <p>
+            Connect instantly using M-Pesa or vouchers and enjoy fast,
+            stable and secure internet powered by Hakim Networks.
+        </p>
+
+        <div class="cta-stats">
+            <div>
+                <strong>99%</strong>
+                <span>Uptime</span>
+            </div>
+
+            <div>
+                <strong>24/7</strong>
+                <span>Support</span>
+            </div>
+
+            <div>
+                <strong>Fast</strong>
+                <span>Activation</span>
+            </div>
+        </div>
+    </div>
+</section>
+    <div class="footer">
+        © <?php echo date("Y"); ?> Hakim Networks • Powered by MikroTik Billing Automation
+    </div>
+
+</div>
+
+<a class="support" href="https://wa.me/254704467699" target="_blank">💬 WhatsApp Support</a>
+
+<script>
+async function loadLiveStatus(){
+    try{
+        const res = await fetch("live_status.php?t=" + Date.now(), {cache:"no-store"});
+        const data = await res.json();
+        const el = document.getElementById("deviceCount");
+        if(el) el.innerText = (data.online_hotspot || 0) + " online";
+    }catch(e){
+        const el = document.getElementById("deviceCount");
+        if(el) el.innerText = "Online";
+    }
+}
+
+loadLiveStatus();
+setInterval(loadLiveStatus, 10000);
+</script>
+
+</body>
+</html>
+
+<style>
+/* Compact professional layout */
+.container{padding:14px 0 18px;}
+.topbar{margin-bottom:10px;}
+.logo{width:44px;height:44px;font-size:24px;border-radius:14px;}
+.brand h1{font-size:20px;}
+.hero{padding:8px 10px 6px;}
+.hero h2{font-size:30px;}
+.hero p{font-size:14px;margin-top:8px;}
+.notice{margin-top:12px;gap:8px;}
+.notice div{padding:10px;font-size:13px;}
+.notice strong{font-size:15px;}
+
+.grid{
+    grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    gap:12px;
+    margin-top:14px;
+}
+.card{padding:15px;border-radius:20px;}
+.card h3{font-size:18px;}
+.price{font-size:27px;margin:10px 0 8px;}
+.meta{gap:6px;margin-bottom:10px;}
+.tag{padding:6px 8px;font-size:11px;}
+input{padding:11px;border-radius:12px;font-size:13px;}
+button{padding:12px;border-radius:13px;font-size:13px;}
+
+.voucher{
+    margin-top:14px;
+    padding:16px;
+    border-radius:20px;
+}
+.voucher h2{font-size:20px;}
+.voucher p{font-size:13px;}
+
+.help{gap:8px;margin-top:10px;}
+.help div{padding:10px;font-size:12px;border-radius:14px;}
+
+.features{
+    margin-top:18px;
+    gap:12px;
+}
+.feature-card{
+    padding:16px;
+    border-radius:20px;
+}
+.feature-icon{
+    width:46px;
+    height:46px;
+    font-size:22px;
+    border-radius:14px;
+    margin-bottom:10px;
+}
+.feature-card h3{font-size:16px;}
+.feature-card p{font-size:12px;line-height:1.45;}
+
+.cta-section{
+    margin-top:18px;
+    border-radius:22px;
+}
+.cta-content{
+    padding:26px 18px;
+}
+.cta-content h2{font-size:24px;}
+.cta-content p{font-size:13px;margin-top:8px;line-height:1.5;}
+.cta-stats{margin-top:14px;gap:10px;}
+.cta-stats div{
+    min-width:100px;
+    padding:10px;
+    border-radius:16px;
+}
+.cta-stats strong{font-size:21px;}
+.cta-stats span{font-size:11px;}
+
+.footer{padding:14px 0 0;font-size:12px;}
+.support{padding:10px 13px;font-size:13px;}
+</style>

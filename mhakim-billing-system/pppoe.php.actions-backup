@@ -1,0 +1,172 @@
+<?php
+require_once "config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$message = "";
+$error = "";
+
+$settings = $pdo->query("SELECT * FROM mikrotik_settings ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+
+function getApi($settings) {
+    return new Client(new Config([
+        "host" => $settings["router_ip"],
+        "user" => $settings["router_username"],
+        "pass" => $settings["router_password"],
+        "port" => (int)$settings["api_port"],
+    ]));
+}
+
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["add_pppoe"])) {
+    try {
+        if (!$settings) throw new Exception("MikroTik settings missing.");
+
+        $api = getApi($settings);
+
+        $name = trim($_POST["username"]);
+        $password = trim($_POST["password"]);
+        $profile = trim($_POST["profile"]);
+        $comment = trim($_POST["comment"]);
+
+        if (!$name || !$password || !$profile) {
+            throw new Exception("Username, password and profile are required.");
+        }
+
+        $api->query(
+            (new Query("/ppp/secret/add"))
+                ->equal("name", $name)
+                ->equal("password", $password)
+                ->equal("service", "pppoe")
+                ->equal("profile", $profile)
+                ->equal("comment", $comment)
+        )->read();
+
+        $message = "PPPoE client added successfully.";
+
+    } catch (Exception $e) {
+        $error = $e->getMessage();
+    }
+}
+
+$secrets = [];
+$active = [];
+
+try {
+    if ($settings) {
+        $api = getApi($settings);
+
+        $secrets = $api->query(new Query("/ppp/secret/print"))->read();
+        $active = $api->query(new Query("/ppp/active/print"))->read();
+    }
+} catch (Exception $e) {
+    $error = $e->getMessage();
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PPPoE Management - M.Hakim</title>
+    <style>
+        body{font-family:Arial;background:#f1f5f9;margin:0;color:#0f172a}
+        .sidebar{width:240px;position:fixed;top:0;left:0;height:100vh;background:#020617;color:white;padding:20px}
+        .sidebar a{display:block;color:#e5e7eb;text-decoration:none;padding:12px;border-radius:10px;margin:6px 0}
+        .sidebar a:hover,.sidebar .active{background:#1e293b}
+        .main{margin-left:280px;padding:25px}
+        .card{background:white;padding:22px;border-radius:18px;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+        input,select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;margin-bottom:12px}
+        button{padding:12px 18px;border:0;border-radius:10px;background:#16a34a;color:white;font-weight:bold;cursor:pointer}
+        table{width:100%;border-collapse:collapse;background:white}
+        th,td{padding:12px;border-bottom:1px solid #e5e7eb;text-align:left}
+        th{background:#0f172a;color:white}
+        .success{background:#dcfce7;color:#166534;padding:12px;border-radius:10px}
+        .error{background:#fee2e2;color:#991b1b;padding:12px;border-radius:10px}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        @media(max-width:900px){.sidebar{position:relative;width:auto;height:auto}.main{margin-left:0}.grid{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>M.Hakim</h2>
+    <a href="noc_final_clean.php">Dashboard</a>
+    <a href="clients.php">Clients</a>
+    <a href="packages.php">Packages</a>
+    <a href="vouchers.php">Vouchers</a>
+    <a href="payments.php">Payments</a>
+    <a class="active" href="pppoe.php">PPPoE</a>
+    <a href="mikrotik.php">MikroTik</a>
+    <a href="logout.php">Logout</a>
+</div>
+
+<div class="main">
+    <h1>PPPoE Management</h1>
+    <p>Create, view and monitor PPPoE clients directly from MikroTik.</p>
+
+    <?php if ($message): ?><p class="success"><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
+    <?php if ($error): ?><p class="error"><?php echo htmlspecialchars($error); ?></p><?php endif; ?>
+
+    <div class="grid">
+        <div class="card">
+            <h2>Add PPPoE Client</h2>
+            <form method="POST">
+                <input type="hidden" name="add_pppoe" value="1">
+
+                <label>Username</label>
+                <input type="text" name="username" placeholder="e.g. hakim001" required>
+
+                <label>Password</label>
+                <input type="text" name="password" placeholder="e.g. 1234" required>
+
+                <label>Profile</label>
+                <select name="profile" required>
+                    <option value="PPPOE-10M">PPPOE-10M</option>
+                    <option value="PPPOE-15M">PPPOE-15M</option>
+                </select>
+
+                <label>Comment / Client Name</label>
+                <input type="text" name="comment" placeholder="e.g. John Home WiFi">
+
+                <button type="submit">Add PPPoE Client</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Live PPPoE Users</h2>
+            <h1><?php echo count($active); ?></h1>
+            <p>Currently connected PPPoE sessions.</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>PPPoE Clients</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Profile</th>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Comment</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($secrets as $s): ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($s["name"] ?? ""); ?></td>
+                        <td><?php echo htmlspecialchars($s["profile"] ?? ""); ?></td>
+                        <td><?php echo htmlspecialchars($s["service"] ?? ""); ?></td>
+                        <td><?php echo isset($s["disabled"]) && $s["disabled"] === "true" ? "Disabled" : "Active"; ?></td>
+                        <td><?php echo htmlspecialchars($s["comment"] ?? ""); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+</body>
+</html>

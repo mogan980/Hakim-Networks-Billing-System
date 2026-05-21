@@ -1,0 +1,47 @@
+<?php
+require_once "config/database.php";
+
+date_default_timezone_set("Africa/Nairobi");
+
+header("Content-Type: application/json");
+
+try {
+    $settings = $pdo->query("
+        SELECT * FROM mikrotik_settings
+        ORDER BY id DESC
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if (!$settings) {
+        throw new Exception("Router settings missing.");
+    }
+
+    $ip = $settings["router_ip"];
+    $port = (int)($settings["api_port"] ?? 8728);
+    $timeout = 3;
+
+    $socket = @fsockopen($ip, $port, $errno, $errstr, $timeout);
+
+    if ($socket) {
+        fclose($socket);
+
+        echo json_encode([
+            "status" => "online",
+            "message" => "Router reachable",
+            "time" => date("Y-m-d H:i:s")
+        ]);
+    } else {
+        echo json_encode([
+            "status" => "offline",
+            "message" => $errstr ?: "Router not reachable",
+            "time" => date("Y-m-d H:i:s")
+        ]);
+    }
+
+} catch (Exception $e) {
+    echo json_encode([
+        "status" => "error",
+        "message" => $e->getMessage(),
+        "time" => date("Y-m-d H:i:s")
+    ]);
+}

@@ -1,0 +1,102 @@
+<?php
+require_once __DIR__."/hotspot_core.php";
+
+function curl_json($url,$headers=[],$payload=null){
+    $ch=curl_init($url);
+    curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
+    curl_setopt($ch,CURLOPT_HTTPHEADER,$headers);
+    curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
+    curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,false);
+    curl_setopt($ch,CURLOPT_SSLVERSION,CURL_SSLVERSION_TLSv1_2);
+    curl_setopt($ch,CURLOPT_IPRESOLVE,CURL_IPRESOLVE_V4);
+    curl_setopt($ch,CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
+    curl_setopt($ch,CURLOPT_TIMEOUT,30);
+
+    if($payload!==null){
+        curl_setopt($ch,CURLOPT_POST,true);
+        curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($payload));
+    }
+
+    $res=curl_exec($ch);
+    $err=curl_error($ch);
+    $code=curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if($err){throw new Exception($err);}
+    return [$code,json_decode($res,true),$res];
+}
+
+try{
+    $phone=preg_replace("/[^0-9]/","",$_POST["phone"] ?? "");
+    $amount=(float)($_POST["amount"] ?? 0);
+    $package_id=$_POST["package_id"] ?? null;
+
+    if(!$phone || !$amount){
+        throw new Exception("Phone or amount missing");
+    }
+
+    if(str_starts_with($phone,"0")){
+        $phone="254".substr($phone,1);
+    }
+
+    $settings=$pdo->query("SELECT * FROM mpesa_settings WHERE id=1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if(!$settings){throw new Exception("M-Pesa settings missing");}
+
+    $key=$settings["consumer_key"];
+    $secret=$settings["consumer_secret"];
+    $shortcode=$settings["shortcode"];
+    $passkey=$settings["passkey"];
+
+    [$code,$tokenData,$raw]=curl_json(
+        "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+        ["Authorization: Basic ".base64_encode($key.":".$secret)]
+    );
+
+    if(empty($tokenData["access_token"])){
+        throw new Exception("TOKEN ERROR: ".$raw);
+    }
+
+    $token=$tokenData["access_token"];
+    $timestamp=date("YmdHis");
+    $password=base64_encode($shortcode.$passkey.$timestamp);
+
+    $callback = $settings["callback_url"] ?? "";
+
+    $payload=[
+        "BusinessShortCode"=>$shortcode,
+        "Password"=>$password,
+        "Timestamp"=>$timestamp,
+        "TransactionType"=>"CustomerPayBillOnline",
+        "Amount"=>$amount,
+        "PartyA"=>$phone,
+        "PartyB"=>$shortcode,
+        "PhoneNumber"=>$phone,
+        "CallBackURL" => $callback,
+        "AccountReference"=>"HakimNet",
+        "TransactionDesc"=>"Hotspot Internet"
+    ];
+
+    [$stkCode,$stkData,$stkRaw]=curl_json(
+        "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+        [
+            "Authorization: Bearer ".$token,
+            "Content-Type: application/json"
+        ],
+        $payload
+    );
+
+    if(empty($stkData["CheckoutRequestID"])){
+        throw new Exception("STK ERROR: ".$stkRaw);
+    }
+
+    $checkout=$stkData["CheckoutRequestID"];
+
+    $st=$pdo->prepare("INSERT INTO payments(amount,method,status,checkout_id,phone,package_id,client_ip,created_at) VALUES(?,?,?,?,?,?,?,NOW())");
+    $st->execute([$amount,"mpesa","pending",$checkout,$phone,$package_id,$_SERVER["REMOTE_ADDR"] ?? null]);
+
+    header("Location: wait_payment.php?checkout_id=".urlencode($checkout));
+    exit;
+
+}catch(Exception $e){
+    echo "TOKEN ERROR: ".$e->getMessage();
+}

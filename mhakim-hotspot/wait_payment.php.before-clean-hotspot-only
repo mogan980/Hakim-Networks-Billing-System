@@ -1,0 +1,109 @@
+<?php
+$checkoutId = $_GET["checkout_id"] ?? "";
+if(!$checkoutId){
+    header("Location: index.php");
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activating Internet</title>
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(135deg,#020617,#064e3b);color:white;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{width:90%;max-width:420px;background:#0f172a;border-radius:26px;padding:32px 24px;text-align:center;box-shadow:0 25px 70px rgba(0,0,0,.35)}
+.spinner{width:72px;height:72px;border:9px solid #334155;border-top-color:#22c55e;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 22px}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{color:#22c55e;margin:0 0 12px}
+.status{background:#020617;padding:15px;border-radius:16px;margin-top:18px}
+.btn{display:none;margin-top:18px;background:#22c55e;color:white;border:none;border-radius:14px;padding:14px 18px;font-weight:900;width:100%}
+.small{color:#94a3b8;font-size:12px;margin-top:15px;word-break:break-all}
+</style>
+</head>
+<body>
+
+<div class="card">
+    <div class="spinner"></div>
+    <h1>Activating Internet</h1>
+    <p>Please wait while we confirm payment and connect your device.</p>
+
+    <div class="status" id="statusBox">Checking payment...</div>
+
+    <button class="btn" id="manualBtn" onclick="submitLogin()">Connect Manually</button>
+
+    <div class="small"><?php echo htmlspecialchars($checkoutId); ?></div>
+</div>
+
+<form id="loginForm" method="post" action="http://neverssl.com/" style="display:none;">
+    <input type="hidden" name="username" id="loginUsername">
+    <input type="hidden" name="password" id="loginPassword">
+    <input type="hidden" name="dst" value="http://neverssl.com/">
+</form>
+
+<script>
+let tries = 0;
+let ready = false;
+
+function submitLogin(){
+    if(!ready) return;
+    window.location.href="http://neverssl.com/";
+}
+
+async function checkPayment(){
+    tries++;
+
+    try{
+        const r = await fetch("check_payment.php?checkout_id=<?php echo urlencode($checkoutId); ?>&t=" + Date.now(), {
+            cache: "no-store"
+        });
+
+        const txt = await r.text();
+        let data;
+
+        try{
+            data = JSON.parse(txt);
+        }catch(e){
+            document.getElementById("statusBox").innerHTML = "Server response issue. Retrying... " + tries;
+            setTimeout(checkPayment, 2500);
+            return;
+        }
+
+        if(data.status === "paid"){
+            document.getElementById("statusBox").innerHTML = "✅ Payment confirmed. Logging you in...";
+
+            document.getElementById("loginUsername").value = data.username;
+            document.getElementById("loginPassword").value = data.password;
+
+            ready = true;
+            document.getElementById("manualBtn").style.display = "block";
+
+            setTimeout(submitLogin, 1500);
+            return;
+        }
+
+        if(data.status === "failed"){
+            document.getElementById("statusBox").innerHTML = "❌ Payment failed. Redirecting...";
+            setTimeout(()=>window.location.href="index.php", 2500);
+            return;
+        }
+
+        if(data.status === "error"){
+            document.getElementById("statusBox").innerHTML = "Activation error: " + (data.message || "Unknown");
+            setTimeout(checkPayment, 3000);
+            return;
+        }
+
+        document.getElementById("statusBox").innerHTML = "Waiting for payment confirmation... " + tries;
+        setTimeout(checkPayment, 2500);
+
+    }catch(e){
+        document.getElementById("statusBox").innerHTML = "Connection issue. Retrying... " + tries;
+        setTimeout(checkPayment, 2500);
+    }
+}
+
+checkPayment();
+</script>
+</body>
+</html>

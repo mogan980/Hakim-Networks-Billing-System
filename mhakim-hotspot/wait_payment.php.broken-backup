@@ -1,0 +1,302 @@
+<?php
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+date_default_timezone_set("Africa/Nairobi");
+
+$hotspotLoginUrl = "http://login.hakim/login";
+$defaultDst = "http://neverssl.com/";
+
+function getPayment($pdo) {
+    $paymentId = $_GET["payment_id"] ?? $_GET["id"] ?? "";
+    $checkoutId = $_GET["checkout_id"] ?? $_GET["CheckoutRequestID"] ?? $_GET["reference"] ?? "";
+    $phone = $_GET["phone"] ?? "";
+
+    if ($paymentId !== "") {
+        $stmt = $pdo->prepare("
+            SELECT 
+                payments.*,
+                clients.username,
+                clients.password,
+                packages.name AS package_name,
+                packages.duration_hours,
+                packages.speed_down,
+                packages.speed_up
+            FROM payments
+            LEFT JOIN clients ON payments.client_id = clients.id
+            LEFT JOIN packages ON payments.package_id = packages.id
+            WHERE payments.id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$paymentId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    if ($checkoutId !== "") {
+        $stmt = $pdo->prepare("
+            SELECT 
+                payments.*,
+                clients.username,
+                clients.password,
+                packages.name AS package_name,
+                packages.duration_hours,
+                packages.speed_down,
+                packages.speed_up
+            FROM payments
+            LEFT JOIN clients ON payments.client_id = clients.id
+            LEFT JOIN packages ON payments.package_id = packages.id
+            WHERE payments.checkout_id = ? OR payments.reference = ?
+            ORDER BY payments.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$checkoutId, $checkoutId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    if ($phone !== "") {
+        $stmt = $pdo->prepare("
+            SELECT 
+                payments.*,
+                clients.username,
+                clients.password,
+                packages.name AS package_name,
+                packages.duration_hours,
+                packages.speed_down,
+                packages.speed_up
+            FROM payments
+            LEFT JOIN clients ON payments.client_id = clients.id
+            LEFT JOIN packages ON payments.package_id = packages.id
+            WHERE payments.phone = ?
+            ORDER BY payments.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$phone]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    $stmt = $pdo->query("
+        SELECT 
+            payments.*,
+            clients.username,
+            clients.password,
+            packages.name AS package_name,
+            packages.duration_hours,
+            packages.speed_down,
+            packages.speed_up
+        FROM payments
+        LEFT JOIN clients ON payments.client_id = clients.id
+        LEFT JOIN packages ON payments.package_id = packages.id
+        ORDER BY payments.id DESC
+        LIMIT 1
+    ");
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+$payment = getPayment($pdo);
+
+if (isset($_GET["ajax"])) {
+    header("Content-Type: application/json");
+
+    if (!$payment) {
+        echo json_encode([
+            "status" => "not_found",
+            "message" => "Payment not found"
+        ]);
+        exit;
+    }
+
+    $username = $payment["username"] ?? "";
+    $password = $payment["password"] ?? "";
+
+    $loginUrl = "";
+
+    if ($payment["status"] === "paid" && $username !== "") {
+        $loginUrl = $hotspotLoginUrl .
+            "?username=" . urlencode($username) .
+            "&password=" . urlencode($password) .
+            "&dst=" . urlencode($defaultDst);
+    }
+
+    echo json_encode([
+        "status" => $payment["status"],
+        "username" => $username,
+        "login_url" => $loginUrl
+    ]);
+    exit;
+}
+
+$status = $payment["status"] ?? "pending";
+$username = $payment["username"] ?? "";
+$password = $payment["password"] ?? "";
+$packageName = $payment["package_name"] ?? "Internet Package";
+$amount = $payment["amount"] ?? "0";
+
+$loginUrl = "";
+
+if ($status === "paid" && $username !== "") {
+    $loginUrl = $hotspotLoginUrl .
+        "?username=" . urlencode($username) .
+        "&password=" . urlencode($password) .
+        "&dst=" . urlencode($defaultDst);
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Payment Status - Hakim Networks</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <?php if ($status === "paid" && $loginUrl !== ""): ?>
+        <meta http-equiv="refresh" content="2;url=<?php echo htmlspecialchars($loginUrl); ?>">
+    <?php endif; ?>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #06121f, #0b2f4f);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card {
+            width: 90%;
+            max-width: 420px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 18px;
+            padding: 28px;
+            text-align: center;
+            box-shadow: 0 20px 45px rgba(0,0,0,0.35);
+        }
+
+        .logo {
+            font-size: 26px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .status {
+            font-size: 22px;
+            font-weight: bold;
+            margin-top: 18px;
+        }
+
+        .pending {
+            color: #ffd166;
+        }
+
+        .paid {
+            color: #4ade80;
+        }
+
+        .failed {
+            color: #ff6b6b;
+        }
+
+        .loader {
+            margin: 24px auto;
+            width: 48px;
+            height: 48px;
+            border: 5px solid rgba(255,255,255,0.25);
+            border-top: 5px solid #4ade80;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .btn {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 14px 22px;
+            border-radius: 12px;
+            background: #4ade80;
+            color: #062012;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .small {
+            opacity: 0.8;
+            font-size: 14px;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="logo">Hakim Networks</div>
+    <p><?php echo htmlspecialchars($packageName); ?> - Ksh <?php echo htmlspecialchars($amount); ?></p>
+
+    <?php if (!$payment): ?>
+        <div class="status failed">Payment Not Found</div>
+        <p class="small">Please go back and try again.</p>
+        <a class="btn" href="index.php">Back to Packages</a>
+
+    <?php elseif ($status === "paid" && $loginUrl !== ""): ?>
+        <div class="status paid">Payment Successful ✅</div>
+        <p>Activating your internet automatically...</p>
+        <div class="loader"></div>
+        <a class="btn" href="<?php echo htmlspecialchars($loginUrl); ?>">Open Internet Now</a>
+
+        <script>
+            setTimeout(function () {
+                window.location.href = "<?php echo $loginUrl; ?>";
+            }, 2000);
+        </script>
+
+    <?php elseif ($status === "failed"): ?>
+        <div class="status failed">Payment Failed ❌</div>
+        <p class="small">Your payment was cancelled or failed.</p>
+        <a class="btn" href="index.php">Try Again</a>
+
+    <?php else: ?>
+        <div class="status pending">Waiting for Payment...</div>
+        <p>Complete the M-Pesa prompt on your phone.</p>
+        <div class="loader"></div>
+        <p class="small">Do not close this page.</p>
+
+        <script>
+            function checkPayment() {
+                const url = new URL(window.location.href);
+                url.searchParams.set("ajax", "1");
+
+                fetch(url.toString())
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === "paid" && data.login_url) {
+                            document.body.innerHTML = `
+                                <div class="card">
+                                    <div class="logo">Hakim Networks</div>
+                                    <div class="status paid">Payment Successful ✅</div>
+                                    <p>Activating your internet automatically...</p>
+                                    <div class="loader"></div>
+                                    <a class="btn" href="${data.login_url}">Open Internet Now</a>
+                                </div>
+                            `;
+
+                            setTimeout(function () {
+                                window.location.href = data.login_url;
+                            }, 1500);
+                        }
+
+                        if (data.status === "failed") {
+                            location.reload();
+                        }
+                    })
+                    .catch(() => {});
+            }
+
+            setInterval(checkPayment, 3000);
+        </script>
+    <?php endif; ?>
+</div>
+
+</body>
+</html>

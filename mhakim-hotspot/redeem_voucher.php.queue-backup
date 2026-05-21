@@ -1,0 +1,257 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+require_once "/var/www/html/mhakim-billing-system/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$voucher_code = strtoupper(trim($_POST["voucher_code"] ?? ""));
+
+if (!$voucher_code) {
+    die("Voucher code missing");
+}
+
+try {
+    $pdo->beginTransaction();
+
+    $voucherQuery = $pdo->prepare("
+        SELECT 
+            vouchers.*,
+            packages.name AS package_name,
+            packages.duration_hours,
+            packages.speed_down,
+            packages.speed_up,
+            packages.price
+        FROM vouchers
+        LEFT JOIN packages ON vouchers.package_id = packages.id
+        WHERE vouchers.code = ?
+        AND vouchers.status = 'unused'
+        LIMIT 1
+    ");
+    $voucherQuery->execute([$voucher_code]);
+    $voucher = $voucherQuery->fetch(PDO::FETCH_ASSOC);
+
+    if (!$voucher) {
+        throw new Exception("Invalid or already used voucher.");
+    }
+
+    $username = $voucher_code;
+    $password = $voucher_code;
+    $duration_minutes = round($voucher["duration_hours"] * 60);
+
+    $insertClient = $pdo->prepare("
+        INSERT INTO clients
+        (full_name, phone, username, password, package_id, status, starts_at, expires_at)
+        VALUES
+        ('Voucher User', '', ?, ?, ?, 'active', NOW(), DATE_ADD(NOW(), INTERVAL ? MINUTE))
+    ");
+    $insertClient->execute([
+        $username,
+        $password,
+        $voucher["package_id"],
+        $duration_minutes
+    ]);
+
+    $client_id = $pdo->lastInsertId();
+
+    $settings = $pdo->query("
+        SELECT * FROM mikrotik_settings 
+        ORDER BY id DESC 
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if (!$settings) {
+        throw new Exception("MikroTik settings missing.");
+    }
+
+    $api = new Client(new Config([
+        'host' => $settings["router_ip"],
+        'user' => $settings["router_username"],
+        'pass' => $settings["router_password"],
+        'port' => (int)$settings["api_port"],
+    ]));
+
+    $findUser = (new Query('/ip/hotspot/user/print'))->where('name', $username);
+    $foundUsers = $api->query($findUser)->read();
+
+    if (!empty($foundUsers)) {
+        $userId = $foundUsers[0][".id"];
+
+        $api->query(
+            (new Query('/ip/hotspot/user/set'))
+                ->equal('.id', $userId)
+                ->equal('password', $password)
+                ->equal('profile', 'default')
+                ->equal('disabled', 'no')
+        )->read();
+    } else {
+        $api->query(
+            (new Query('/ip/hotspot/user/add'))
+                ->equal('name', $username)
+                ->equal('password', $password)
+                ->equal('profile', 'default')
+        )->read();
+    }
+
+    $pdo->prepare("
+        UPDATE vouchers 
+        SET status='used', used_by_client_id=?, used_at=NOW()
+        WHERE id=?
+    ")->execute([$client_id, $voucher["id"]]);
+
+    $pdo->prepare("
+        INSERT INTO payments(client_id, package_id, amount, method, reference, status)
+        VALUES (?, ?, ?, 'voucher', ?, 'paid')
+    ")->execute([
+        $client_id,
+        $voucher["package_id"],
+        $voucher["price"],
+        $voucher_code
+    ]);
+
+    $expiryQuery = $pdo->prepare("SELECT expires_at FROM clients WHERE id=?");
+    $expiryQuery->execute([$client_id]);
+    $expires_at = $expiryQuery->fetchColumn();
+
+    $pdo->commit();
+
+} catch (Exception $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    echo "<h1 style='color:red;font-family:Arial'>Voucher Activation Failed</h1>";
+    echo "<p style='font-family:Arial'>" . htmlspecialchars($e->getMessage()) . "</p>";
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voucher Activated - M.Hakim</title>
+
+    <script>
+        setTimeout(function(){
+            document.getElementById("hotspotLogin").submit();
+        }, 1500);
+    </script>
+
+    <style>
+        *{box-sizing:border-box}
+        body{
+            margin:0;
+            font-family:Arial,sans-serif;
+            background:linear-gradient(135deg,#020617,#0f172a,#166534);
+            min-height:100vh;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#0f172a;
+            padding:18px;
+        }
+        .card{
+            width:430px;
+            background:white;
+            border-radius:26px;
+            padding:34px;
+            text-align:center;
+            box-shadow:0 25px 60px rgba(0,0,0,.35);
+        }
+        .check{
+            width:90px;
+            height:90px;
+            border-radius:50%;
+            background:#dcfce7;
+            color:#16a34a;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:50px;
+            margin:0 auto 18px;
+        }
+        h1{color:#16a34a;margin:0;font-size:30px}
+        p{color:#475569}
+        .details{
+            background:#f8fafc;
+            border-radius:18px;
+            padding:16px;
+            margin-top:20px;
+            text-align:left;
+        }
+        .row{
+            display:flex;
+            justify-content:space-between;
+            gap:15px;
+            padding:10px 0;
+            border-bottom:1px solid #e5e7eb;
+            font-size:14px;
+        }
+        .row:last-child{border-bottom:none}
+        .label{color:#64748b}
+        .value{font-weight:bold;text-align:right}
+        .btn{
+            width:100%;
+            border:0;
+            display:block;
+            margin-top:20px;
+            background:#16a34a;
+            color:white;
+            padding:15px;
+            border-radius:14px;
+            text-decoration:none;
+            font-weight:bold;
+            font-size:15px;
+            cursor:pointer;
+        }
+        .note{margin-top:14px;font-size:13px;color:#64748b}
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="check">✓</div>
+
+    <h1>Voucher Activated</h1>
+    <p>Internet access is ready. Connecting automatically...</p>
+
+    <div class="details">
+        <div class="row">
+            <span class="label">Package</span>
+            <span class="value"><?php echo htmlspecialchars($voucher["package_name"]); ?></span>
+        </div>
+        <div class="row">
+            <span class="label">Username</span>
+            <span class="value"><?php echo htmlspecialchars($username); ?></span>
+        </div>
+        <div class="row">
+            <span class="label">Password</span>
+            <span class="value"><?php echo htmlspecialchars($password); ?></span>
+        </div>
+        <div class="row">
+            <span class="label">Speed</span>
+            <span class="value"><?php echo htmlspecialchars($voucher["speed_down"]); ?> / <?php echo htmlspecialchars($voucher["speed_up"]); ?></span>
+        </div>
+        <div class="row">
+            <span class="label">Expires</span>
+            <span class="value"><?php echo htmlspecialchars($expires_at); ?></span>
+        </div>
+    </div>
+
+    <form id="hotspotLogin" action="http://login.hakim/login" method="post">
+        <input type="hidden" name="username" value="<?php echo htmlspecialchars($username); ?>">
+        <input type="hidden" name="password" value="<?php echo htmlspecialchars($password); ?>">
+        <input type="hidden" name="dst" value="http://neverssl.com">
+        <input type="hidden" name="popup" value="false">
+        <button class="btn" type="submit">Connect Internet Now</button>
+    </form>
+
+    <div class="note">
+        If it does not connect automatically, tap the green button.
+    </div>
+</div>
+
+</body>
+</html>

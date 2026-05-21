@@ -1,0 +1,122 @@
+<?php
+require_once __DIR__ . "/router_connect.php";
+
+use RouterOS\Query;
+
+header("Content-Type: application/json");
+
+function reply($arr){
+    echo json_encode($arr);
+    exit;
+}
+
+$checkout = $_GET["checkout_id"] ?? "";
+
+if(!$checkout){
+    reply(["status"=>"missing"]);
+}
+
+try{
+    $stmt = $pdo->prepare("SELECT * FROM payments WHERE checkout_id=? LIMIT 1");
+    $stmt->execute([$checkout]);
+    $payment = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if(!$payment){
+        reply(["status"=>"pending"]);
+    }
+
+    if($payment["status"] === "failed"){
+        reply(["status"=>"failed"]);
+    }
+
+    if($payment["status"] !== "paid"){
+        reply(["status"=>"pending"]);
+    }
+
+    $phone = preg_replace("/[^0-9]/", "", $payment["phone"] ?? "");
+
+    if(!$phone){
+        reply(["status"=>"error", "message"=>"Payment phone missing"]);
+    }
+
+    $username = $phone;
+    $password = substr($phone, -4);
+
+    $api = hotspotRouter();
+
+    $profile = "default";
+    $limit = "1h";
+
+    if(!empty($payment["package_id"])){
+        $p = $pdo->prepare("SELECT * FROM packages WHERE id=? LIMIT 1");
+        $p->execute([$payment["package_id"]]);
+        $pkg = $p->fetch(PDO::FETCH_ASSOC);
+
+        if($pkg){
+            $down = $pkg["speed_down"] ?? "8M";
+            $up = $pkg["speed_up"] ?? "2M";
+            $limit = max(1, ceil((float)($pkg["duration_hours"] ?? 1)))."h";
+
+            $profile = "PAYMENT-" . preg_replace("/[^0-9A-Za-z_-]/", "", $down."-".$up);
+
+            $profiles = $api->query(
+                (new Query("/ip/hotspot/user/profile/print"))
+                ->where("name", $profile)
+            )->read();
+
+            if(empty($profiles)){
+                try{
+                    $api->query(
+                        (new Query("/ip/hotspot/user/profile/add"))
+                        ->equal("name", $profile)
+                        ->equal("rate-limit", $up."/".$down)
+                    )->read();
+                }catch(Exception $e){
+                    $profile = "default";
+                }
+            }
+        }
+    }
+
+    $existing = $api->query(
+        (new Query("/ip/hotspot/user/print"))
+        ->where("name", $username)
+    )->read();
+
+    if(empty($existing)){
+        $api->query(
+            (new Query("/ip/hotspot/user/add"))
+            ->equal("name", $username)
+            ->equal("password", $password)
+            ->equal("profile", $profile)
+            ->equal("limit-uptime", $limit)
+            ->equal("disabled", "no")
+            ->equal("comment", "mpesa:".$checkout)
+        )->read();
+    }else{
+        foreach($existing as $u){
+            if(!empty($u[".id"])){
+                $api->query(
+                    (new Query("/ip/hotspot/user/set"))
+                    ->equal(".id", $u[".id"])
+                    ->equal("password", $password)
+                    ->equal("profile", $profile)
+                    ->equal("limit-uptime", $limit)
+                    ->equal("disabled", "no")
+                    ->equal("comment", "mpesa:".$checkout)
+                )->read();
+            }
+        }
+    }
+
+    reply([
+        "status"=>"paid",
+        "username"=>$username,
+        "password"=>$password,
+        "login_url"=>"http://192.168.88.1/login",
+        "dst"=>"http://neverssl.com/"
+    ]);
+
+}catch(Exception $e){
+    reply(["status"=>"error", "message"=>$e->getMessage()]);
+}

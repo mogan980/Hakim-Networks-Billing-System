@@ -1,0 +1,169 @@
+<?php
+
+require_once "../mhakim-billing-system/config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+date_default_timezone_set("Africa/Nairobi");
+
+function logData($msg){
+    file_put_contents(
+        __DIR__ . "/mpesa_callback.log",
+        "[" . date("Y-m-d H:i:s") . "] " . $msg . PHP_EOL,
+        FILE_APPEND
+    );
+}
+
+function logError($msg){
+    file_put_contents(
+        __DIR__ . "/mpesa_callback_error.log",
+        "[" . date("Y-m-d H:i:s") . "] " . $msg . PHP_EOL,
+        FILE_APPEND
+    );
+}
+
+try {
+
+    $callbackJSON = file_get_contents("php://input");
+
+    logData($callbackJSON);
+
+    $data = json_decode($callbackJSON, true);
+
+    if(
+        !isset($data["Body"]["stkCallback"]["CheckoutRequestID"])
+    ){
+        throw new Exception("Invalid callback data");
+    }
+
+    $stk = $data["Body"]["stkCallback"];
+
+    $checkoutId = $stk["CheckoutRequestID"];
+    $resultCode = $stk["ResultCode"];
+
+    if($resultCode != 0){
+
+        $stmt = $pdo->prepare("
+            UPDATE payments
+            SET status='failed'
+            WHERE checkout_id=?
+        ");
+
+        $stmt->execute([$checkoutId]);
+
+        exit;
+    }
+
+    $meta = $stk["CallbackMetadata"]["Item"] ?? [];
+
+    $amount = 0;
+    $receipt = "";
+    $phone = "";
+
+    foreach($meta as $item){
+
+        if($item["Name"] == "Amount"){
+            $amount = $item["Value"];
+        }
+
+        if($item["Name"] == "MpesaReceiptNumber"){
+            $receipt = $item["Value"];
+        }
+
+        if($item["Name"] == "PhoneNumber"){
+            $phone = $item["Value"];
+        }
+    }
+
+    $stmt = $pdo->prepare("
+        UPDATE payments
+        SET
+            status='paid',
+            mpesa_receipt=?,
+            phone=?
+        WHERE checkout_id=?
+    ");
+
+    $stmt->execute([
+        $receipt,
+        $phone,
+        $checkoutId
+    ]);
+
+    /*
+     * Activate internet
+     */
+
+    $settings = $pdo->query("
+        SELECT * FROM mikrotik_settings
+        ORDER BY id DESC
+        LIMIT 1
+    ")->fetch(PDO::FETCH_ASSOC);
+
+    if(!$settings){
+        throw new Exception("Missing MikroTik settings");
+    }
+
+    $api = new Client(new Config([
+        "host" => $settings["router_ip"],
+        "user" => $settings["router_username"],
+        "pass" => $settings["router_password"],
+        "port" => (int)$settings["api_port"],
+        "timeout" => 5
+    ]));
+
+    $ip =
+        $_SERVER["HTTP_X_FORWARDED_FOR"]
+        ?? $_SERVER["REMOTE_ADDR"]
+        ?? "192.168.88.199";
+
+    /*
+     * Add hotspot bypass
+     */
+
+    $binding = $api->query(
+        (new Query("/ip/hotspot/ip-binding/print"))
+            ->where("address", $ip)
+    )->read();
+
+    if(empty($binding)){
+
+        $api->query(
+            (new Query("/ip/hotspot/ip-binding/add"))
+                ->equal("address", $ip)
+                ->equal("type", "bypassed")
+                ->equal("comment", "mpesa-auto")
+        )->read();
+    }
+
+    /*
+     * Queue
+     */
+
+    $queueName = "MPESA-" . $phone;
+
+    $queue = $api->query(
+        (new Query("/queue/simple/print"))
+            ->where("name", $queueName)
+    )->read();
+
+    if(empty($queue)){
+
+        $api->query(
+            (new Query("/queue/simple/add"))
+                ->equal("name", $queueName)
+                ->equal("target", $ip . "/32")
+                ->equal("max-limit", "6M/2M")
+                ->equal("comment", "mpesa-auto")
+        )->read();
+    }
+
+    logData("PAYMENT ACTIVATED SUCCESSFULLY");
+
+}catch(Exception $e){
+
+    logError($e->getMessage());
+}

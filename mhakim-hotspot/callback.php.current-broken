@@ -1,0 +1,57 @@
+<?php
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+$raw = file_get_contents("php://input");
+file_put_contents(__DIR__."/mpesa_callback.log", date("Y-m-d H:i:s")." ".$raw.PHP_EOL, FILE_APPEND);
+
+$data = json_decode($raw,true);
+$stk = $data["Body"]["stkCallback"] ?? null;
+
+if(!$stk){
+    http_response_code(200);
+    echo "OK";
+    exit;
+}
+
+$checkout = $stk["CheckoutRequestID"] ?? "";
+$result = (int)($stk["ResultCode"] ?? 1);
+
+if(!$checkout){
+    http_response_code(200);
+    echo "OK";
+    exit;
+}
+
+if($result !== 0){
+    $stmt = $pdo->prepare("UPDATE payments SET status='failed' WHERE checkout_id=?");
+    $stmt->execute([$checkout]);
+
+    http_response_code(200);
+    echo "OK";
+    exit;
+}
+
+$receipt = "";
+$phone = "";
+
+foreach(($stk["CallbackMetadata"]["Item"] ?? []) as $item){
+    if(($item["Name"] ?? "") === "MpesaReceiptNumber"){
+        $receipt = $item["Value"] ?? "";
+    }
+    if(($item["Name"] ?? "") === "PhoneNumber"){
+        $phone = $item["Value"] ?? "";
+    }
+}
+
+$stmt = $pdo->prepare("
+    UPDATE payments
+    SET status='paid',
+        mpesa_receipt=?,
+        phone=COALESCE(NULLIF(phone,''), ?)
+    WHERE checkout_id=?
+");
+
+$stmt->execute([$receipt, $phone, $checkout]);
+
+http_response_code(200);
+echo "OK";

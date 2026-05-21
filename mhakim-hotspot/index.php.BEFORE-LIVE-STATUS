@@ -1,0 +1,339 @@
+<?php
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+date_default_timezone_set("Africa/Nairobi");
+
+try {
+    $stmt = $pdo->query("
+        SELECT *
+        FROM packages
+        WHERE status='active'
+        ORDER BY price ASC
+    ");
+    $packages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    die("Failed to load packages: " . $e->getMessage());
+}
+
+function speedText($down, $up){
+    $down = trim((string)$down);
+    $up = trim((string)$up);
+
+    if($down === "") $down = "6M";
+    if($up === "") $up = "2M";
+
+    return strtoupper($down) . " / " . strtoupper($up);
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Hakim Networks - Internet Access</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box}
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    color:white;
+    min-height:100vh;
+    background:
+        radial-gradient(circle at top left,rgba(34,197,94,.28),transparent 35%),
+        radial-gradient(circle at bottom right,rgba(14,165,233,.22),transparent 35%),
+        linear-gradient(135deg,#020617,#052e2b,#064e3b);
+}
+.bg-orb{
+    position:fixed;
+    width:260px;
+    height:260px;
+    border-radius:50%;
+    filter:blur(45px);
+    opacity:.45;
+    z-index:-1;
+    animation:float 7s ease-in-out infinite alternate;
+}
+.orb1{background:#22c55e;top:40px;left:20px}
+.orb2{background:#38bdf8;bottom:40px;right:20px;animation-delay:1.4s}
+@keyframes float{from{transform:translateY(0)}to{transform:translateY(35px)}}
+
+.container{
+    width:94%;
+    max-width:1180px;
+    margin:auto;
+    padding:22px 0 26px;
+}
+.topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    margin-bottom:20px;
+}
+.brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+}
+.logo{
+    width:50px;
+    height:50px;
+    border-radius:16px;
+    display:grid;
+    place-items:center;
+    font-size:26px;
+    font-weight:900;
+    color:#052e16;
+    background:linear-gradient(135deg,#22c55e,#a7f3d0);
+    box-shadow:0 14px 35px rgba(34,197,94,.35);
+}
+.brand h1{margin:0;font-size:24px}
+.brand small{color:#d1fae5}
+.status-pill{
+    padding:10px 14px;
+    border:1px solid rgba(34,197,94,.35);
+    background:rgba(15,23,42,.55);
+    border-radius:999px;
+    color:#bbf7d0;
+    font-size:13px;
+    backdrop-filter:blur(14px);
+}
+.hero{
+    text-align:center;
+    padding:22px 12px 18px;
+}
+.hero h2{
+    margin:0;
+    font-size:38px;
+    line-height:1.1;
+}
+.hero p{
+    color:#d1fae5;
+    max-width:680px;
+    margin:12px auto 0;
+    line-height:1.6;
+}
+.indicators{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:12px;
+    margin:22px auto;
+    max-width:760px;
+}
+.indicator{
+    background:rgba(15,23,42,.58);
+    border:1px solid rgba(148,163,184,.18);
+    border-radius:18px;
+    padding:14px;
+    backdrop-filter:blur(16px);
+}
+.indicator strong{display:block;font-size:18px;color:#22c55e}
+.indicator span{font-size:12px;color:#cbd5e1}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(245px,1fr));
+    gap:18px;
+    margin-top:20px;
+}
+.card{
+    position:relative;
+    overflow:hidden;
+    background:rgba(15,23,42,.72);
+    border:1px solid rgba(148,163,184,.20);
+    border-radius:24px;
+    padding:22px;
+    box-shadow:0 25px 70px rgba(0,0,0,.30);
+    backdrop-filter:blur(18px);
+    animation:rise .45s ease both;
+}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+.card:before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg,rgba(34,197,94,.16),transparent 42%);
+    pointer-events:none;
+}
+.card h3{
+    margin:0 0 10px;
+    font-size:22px;
+}
+.price{
+    font-size:34px;
+    font-weight:900;
+    color:#22c55e;
+    margin:8px 0;
+}
+.meta{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin:13px 0 16px;
+}
+.tag{
+    font-size:12px;
+    padding:7px 10px;
+    border-radius:999px;
+    background:rgba(34,197,94,.12);
+    color:#bbf7d0;
+    border:1px solid rgba(34,197,94,.25);
+}
+input{
+    width:100%;
+    padding:13px 14px;
+    border:1px solid rgba(148,163,184,.25);
+    border-radius:14px;
+    background:rgba(2,6,23,.72);
+    color:white;
+    outline:none;
+    margin-bottom:10px;
+}
+input:focus{
+    border-color:#22c55e;
+    box-shadow:0 0 0 3px rgba(34,197,94,.14);
+}
+button{
+    width:100%;
+    border:0;
+    padding:14px 16px;
+    border-radius:15px;
+    background:linear-gradient(135deg,#22c55e,#86efac);
+    color:#052e16;
+    font-weight:900;
+    cursor:pointer;
+    font-size:15px;
+}
+button:hover{filter:brightness(1.07)}
+.voucher-box{
+    margin-top:22px;
+    background:rgba(15,23,42,.78);
+    border:1px solid rgba(34,197,94,.28);
+    border-radius:24px;
+    padding:22px;
+    box-shadow:0 25px 70px rgba(0,0,0,.25);
+    backdrop-filter:blur(18px);
+}
+.voucher-box h2{margin:0 0 8px}
+.support{
+    position:fixed;
+    right:18px;
+    bottom:18px;
+    text-decoration:none;
+    background:#22c55e;
+    color:#052e16;
+    font-weight:900;
+    padding:13px 16px;
+    border-radius:999px;
+    box-shadow:0 18px 45px rgba(34,197,94,.35);
+}
+.footer{
+    text-align:center;
+    color:#cbd5e1;
+    font-size:13px;
+    padding:22px 8px 0;
+}
+.error{
+    background:#450a0a;
+    color:#fecaca;
+    padding:12px;
+    border-radius:14px;
+    margin-bottom:15px;
+}
+@media(max-width:720px){
+    .topbar{align-items:flex-start;flex-direction:column}
+    .hero h2{font-size:29px}
+    .indicators{grid-template-columns:1fr}
+    .support{left:18px;text-align:center}
+}
+</style>
+</head>
+<body>
+<div class="bg-orb orb1"></div>
+<div class="bg-orb orb2"></div>
+
+<div class="container">
+    <div class="topbar">
+        <div class="brand">
+            <div class="logo">H</div>
+            <div>
+                <h1>Hakim Networks</h1>
+                <small>Fast • Secure • Reliable Internet</small>
+            </div>
+        </div>
+
+        <div class="status-pill">
+            ● Live Network • Connected Devices: <span id="deviceCount">Checking...</span>
+        </div>
+    </div>
+
+    <section class="hero">
+        <h2>Buy Internet Access Instantly</h2>
+        <p>Select a package, pay via M-Pesa STK Push, or redeem a voucher. Your device will be logged in automatically.</p>
+
+        <div class="indicators">
+            <div class="indicator"><strong>24/7</strong><span>Hotspot Access</span></div>
+            <div class="indicator"><strong>Auto</strong><span>M-Pesa Activation</span></div>
+            <div class="indicator"><strong>Secure</strong><span>Voucher Login</span></div>
+        </div>
+    </section>
+
+    <?php if(isset($_GET["error"])): ?>
+        <div class="error"><?php echo htmlspecialchars($_GET["error"]); ?></div>
+    <?php endif; ?>
+
+    <div class="grid">
+        <?php foreach($packages as $package): ?>
+            <div class="card">
+                <h3><?php echo htmlspecialchars($package["name"]); ?></h3>
+
+                <div class="price">
+                    KES <?php echo number_format((float)$package["price"]); ?>
+                </div>
+
+                <div class="meta">
+                    <span class="tag">⚡ <?php echo htmlspecialchars(speedText($package["speed_down"] ?? "", $package["speed_up"] ?? "")); ?></span>
+                    <span class="tag">⏱ <?php echo htmlspecialchars($package["duration_hours"]); ?> hrs</span>
+                </div>
+
+                <form method="POST" action="stk_push.php">
+                    <input type="hidden" name="client_ip" value="$(ip)">
+                    <input type="hidden" name="package_id" value="<?php echo htmlspecialchars($package["id"]); ?>">
+                    <input type="text" name="phone" placeholder="M-Pesa number e.g. 0704467699" required>
+                    <button type="submit">Pay with M-Pesa</button>
+                </form>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
+    <div class="voucher-box">
+        <h2>Have a Voucher?</h2>
+        <p style="color:#cbd5e1;margin-top:0;">Enter your voucher code to activate internet instantly.</p>
+
+        <form method="POST" action="redeem_voucher.php">
+            <input type="hidden" name="client_ip" value="$(ip)">
+            <input type="text" name="voucher_code" placeholder="Enter voucher code" required>
+            <button type="submit">Redeem Voucher</button>
+        </form>
+    </div>
+
+    <div class="footer">
+        © <?php echo date("Y"); ?> Hakim Networks. Powered by MikroTik Billing Automation.
+    </div>
+</div>
+
+<a class="support" href="https://wa.me/254704467699" target="_blank">💬 WhatsApp Support</a>
+
+<script>
+let seconds = 0;
+setInterval(() => {
+    seconds++;
+    const el = document.getElementById("deviceCount");
+    if(el){
+        el.innerText = seconds < 3 ? "Syncing" : "Online";
+    }
+}, 1000);
+</script>
+
+</body>
+</html>

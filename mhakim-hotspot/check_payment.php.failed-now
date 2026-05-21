@@ -1,0 +1,137 @@
+<?php
+require_once __DIR__ . '/hotspot_activate.php';
+
+header("Content-Type: application/json");
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$router = $pdo->query("SELECT * FROM super_admin_router LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if(!$router){
+    global $router;
+    die("Router not configured");
+}
+
+
+$checkoutId = $_GET["checkout_id"] ?? "";
+
+function respond($data){
+    echo json_encode($data);
+    exit;
+}
+
+function speedLimit($speed, $fallback){
+    $speed = trim((string)$speed);
+    if($speed === "") return $fallback;
+    if(preg_match('/^\d+$/', $speed)) return $speed . "M";
+    return strtoupper($speed);
+}
+
+function activateInternet($pdo, $checkoutId){
+    $stmt = $pdo->prepare("SELECT * FROM payments WHERE checkout_id=? LIMIT 1");
+    $stmt->execute([$checkoutId]);
+    $payment = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if(!$payment){
+        throw new Exception("Payment not found");
+    }
+
+    $phone = $payment["phone"] ?? "";
+    if(!$phone){
+        throw new Exception("Payment phone missing");
+    }
+
+    $username = preg_replace("/[^0-9]/", "", $phone);
+    $password = substr($username, -4);
+
+    return activateHotspotUser($pdo, $username, $password, "1h");
+}
+
+if(!$checkoutId){
+    respond(["status"=>"missing"]);
+}
+
+$paymentStmt = $pdo->prepare("
+    SELECT *
+    FROM payments
+    WHERE checkout_id=?
+    ORDER BY id DESC
+    LIMIT 1
+");
+$paymentStmt->execute([$checkoutId]);
+$payment = $paymentStmt->fetch(PDO::FETCH_ASSOC);
+
+if(!$payment){
+    respond(["status"=>"pending"]);
+}
+
+if($payment["status"] === "paid"){
+
+    $login = activateInternet($pdo, $checkoutId);
+
+    if(!$login){
+        respond([
+            "status" => "error",
+            "message" => "Internet activation failed"
+        ]);
+    }
+
+    respond([
+        "status" => "paid",
+        "username" => $login["username"] ?? $payment["phone"],
+        "password" => $login["password"] ?? "1234",
+        "redirect" => "http://login.hakim/status"
+    ]);
+}
+
+if($payment["status"] === "failed"){
+    respond(["status"=>"failed"]);
+}
+
+/*
+ * Sandbox helper:
+ * If callback is delayed, auto-approve after 20 seconds.
+ * Remove this block when Daraja LIVE is fully approved.
+ */
+$mpesa = $pdo->query("
+    SELECT environment
+    FROM mpesa_settings
+    WHERE status='active'
+    ORDER BY id DESC
+    LIMIT 1
+")->fetch(PDO::FETCH_ASSOC);
+
+$age = time() - strtotime($payment["created_at"]);
+
+if(strtolower($mpesa["environment"] ?? "sandbox") === "sandbox" && $age >= 20){
+
+    $pdo->prepare("
+        UPDATE payments
+        SET status='paid',
+            mpesa_receipt=COALESCE(mpesa_receipt, CONCAT('SANDBOX-', id))
+        WHERE checkout_id=?
+    ")->execute([$checkoutId]);
+
+    $login = activateInternet($pdo, $checkoutId);
+
+    if(!$login){
+        respond([
+            "status" => "error",
+            "message" => "Internet activation failed"
+        ]);
+    }
+
+    respond([
+        "status" => "paid",
+        "username" => $login["username"] ?? "",
+        "password" => $login["password"] ?? "",
+        "redirect" => "http://login.hakim/status"
+    ]);
+}
+
+respond(["status"=>"pending"]);

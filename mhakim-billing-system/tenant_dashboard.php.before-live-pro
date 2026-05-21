@@ -1,0 +1,98 @@
+<?php
+require_once __DIR__ . "/access_guard.php";
+require_once __DIR__ . "/config/database.php";
+
+if (($_SESSION["tenant_role"] ?? "") === "super_admin") {
+    header("Location: noc_final_clean.php");
+    exit;
+}
+
+$companyId = $_SESSION["tenant_company_id"];
+$name = $_SESSION["tenant_name"] ?? "Client";
+
+$countClients = $pdo->prepare("SELECT COUNT(*) FROM clients WHERE company_id=?");
+$countClients->execute([$companyId]);
+
+$countPackages = $pdo->prepare("SELECT COUNT(*) FROM packages WHERE company_id=?");
+$countPackages->execute([$companyId]);
+
+$countVouchers = $pdo->prepare("SELECT COUNT(*) FROM vouchers WHERE company_id=?");
+$countVouchers->execute([$companyId]);
+
+$totalRevenue = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM payments WHERE company_id=? AND status='paid'");
+$totalRevenue->execute([$companyId]);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>My ISP Workspace - Hakim Networks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(135deg,#020617,#052e2b,#071827);color:white}
+.sidebar{width:270px;height:100vh;position:fixed;left:0;top:0;background:linear-gradient(180deg,#020617,#071827,#052e2b);padding:22px;border-right:1px solid rgba(34,197,94,.18)}
+.logo{width:58px;height:58px;border-radius:18px;background:linear-gradient(135deg,#22c55e,#86efac);color:#052e16;display:grid;place-items:center;font-size:28px;font-weight:900;margin-bottom:14px}
+.sidebar h2{margin:0;color:#fff}.sidebar p{color:#94a3b8;font-size:13px}
+.sidebar a{display:block;color:white;text-decoration:none;padding:14px;border-radius:14px;margin:8px 0;background:rgba(15,23,42,.65);font-weight:700}
+.sidebar a:hover,.sidebar a.active{background:#22c55e;color:#052e16}
+.main{margin-left:290px;padding:30px}
+.hero{background:rgba(15,23,42,.88);border:1px solid rgba(34,197,94,.18);border-radius:28px;padding:28px;box-shadow:0 25px 80px rgba(0,0,0,.35)}
+.hero h1{margin:0;color:#22c55e}.hero p{color:#cbd5e1}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;margin-top:22px}
+.card{background:rgba(15,23,42,.85);border:1px solid rgba(148,163,184,.14);border-radius:22px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.card h3{margin:0;color:#94a3b8;font-size:14px}.card strong{display:block;margin-top:12px;font-size:30px;color:#22c55e}
+.actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-top:24px}
+.action{background:rgba(15,23,42,.85);border:1px solid rgba(34,197,94,.16);border-radius:22px;padding:22px;text-decoration:none;color:white}
+.action h3{color:#22c55e;margin-top:0}.action p{color:#cbd5e1}
+@media(max-width:800px){.sidebar{position:relative;width:100%;height:auto}.main{margin-left:0;padding:18px}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="logo">H</div>
+    <h2>Hakim Networks</h2>
+    <p><?php echo htmlspecialchars($name); ?></p>
+
+    <a class="active" href="/mhakim-billing-system/tenant_noc_final_clean.php">📊 Dashboard</a>
+    <a href="/mhakim-billing-system/tenant/tenant_clients.php">👥 Clients</a>
+    <a href="/mhakim-billing-system/tenant/tenant_packages.php">📦 Packages</a>
+    <a href="/mhakim-billing-system/tenant/tenant_vouchers.php">🎟️ Vouchers</a>
+    <a href="/mhakim-billing-system/tenant/tenant_payments.php">💳 Payments</a>
+    <a href="/mhakim-billing-system/router_wizard.php">🧙 Router Wizard</a>
+    <a href="/mhakim-billing-system/logout.php">🚪 Logout</a>
+</div>
+
+<div class="main">
+    <div class="hero">
+        <h1>My ISP Billing Workspace</h1>
+        <p>Start by creating your own packages, clients and vouchers. Your data is private and separated from other users.</p>
+    </div>
+
+    <div class="grid">
+        <div class="card"><h3>My Clients</h3><strong><?php echo $countClients->fetchColumn(); ?></strong></div>
+        <div class="card"><h3>My Packages</h3><strong><?php echo $countPackages->fetchColumn(); ?></strong></div>
+        <div class="card"><h3>My Vouchers</h3><strong><?php echo $countVouchers->fetchColumn(); ?></strong></div>
+        <div class="card"><h3>My Revenue</h3><strong>KES <?php echo number_format($totalRevenue->fetchColumn()); ?></strong></div>
+    </div>
+
+    <div class="actions">
+        <a class="action" href="/mhakim-billing-system/tenant/tenant_packages.php">
+            <h3>Create Internet Packages</h3>
+            <p>Add your own hourly, daily, weekly or monthly packages.</p>
+        </a>
+
+        <a class="action" href="/mhakim-billing-system/tenant/tenant_vouchers.php">
+            <h3>Manage Vouchers</h3>
+            <p>Generate vouchers for your own customers.</p>
+        </a>
+
+        <a class="action" href="/mhakim-billing-system/router_wizard.php">
+            <h3>Connect MikroTik</h3>
+            <p>Use Router Wizard to link your own router securely.</p>
+        </a>
+    </div>
+</div>
+
+</body>
+</html>

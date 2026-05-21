@@ -1,0 +1,26 @@
+<?php
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$u = $_GET["u"] ?? "";
+$p = $_GET["p"] ?? "";
+
+if(!$u || !$p){
+    header("Location: index.php?error=Missing login details");
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html>
+<body onload="setTimeout(()=>document.forms[0].submit(),800)">
+<h2>Voucher activated. Logging in...</h2>
+
+<form method="post" action="http://login.hakim/login">
+<input type="hidden" name="username" value="<?php echo htmlspecialchars($u); ?>">
+<input type="hidden" name="password" value="<?php echo htmlspecialchars($p); ?>">
+<input type="hidden" name="dst" value="http://neverssl.com">
+<button type="submit">Continue to Internet</button>
+</form>
+</body>
+</html>

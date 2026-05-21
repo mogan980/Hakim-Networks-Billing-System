@@ -1,0 +1,167 @@
+<?php
+$checkout = $_GET["checkout_id"] ?? "";
+if(!$checkout){
+    header("Location: index.php");
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hakim Networks - Activating Internet</title>
+<style>
+*{box-sizing:border-box}
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:radial-gradient(circle at top,#16a34a33,#020617 48%),linear-gradient(135deg,#020617,#064e3b);
+    color:white;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+}
+.card{
+    width:100%;
+    max-width:440px;
+    background:rgba(15,23,42,.95);
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:28px;
+    padding:34px 24px;
+    text-align:center;
+    box-shadow:0 30px 80px rgba(0,0,0,.45);
+}
+.logo{
+    width:72px;
+    height:72px;
+    border-radius:22px;
+    background:#22c55e;
+    color:#052e16;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:36px;
+    font-weight:900;
+    margin:0 auto 18px;
+}
+.spinner{
+    width:72px;
+    height:72px;
+    border:9px solid #334155;
+    border-top-color:#22c55e;
+    border-radius:50%;
+    animation:spin 1s linear infinite;
+    margin:18px auto;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+h1{margin:0;color:#22c55e;font-size:30px}
+p{color:#cbd5e1;line-height:1.5}
+.status{
+    background:#020617;
+    border:1px solid rgba(255,255,255,.08);
+    padding:16px;
+    border-radius:16px;
+    margin-top:16px;
+    color:#e2e8f0;
+}
+.btn{
+    display:none;
+    margin-top:16px;
+    background:#22c55e;
+    color:white;
+    border:none;
+    border-radius:16px;
+    padding:15px;
+    width:100%;
+    font-weight:900;
+    font-size:16px;
+}
+.small{margin-top:14px;color:#94a3b8;font-size:12px;word-break:break-all}
+</style>
+</head>
+<body>
+
+<div class="card">
+    <div class="logo">H</div>
+    <h1>Waiting for Payment</h1>
+    <p>Enter your M-Pesa PIN. Your internet will activate automatically after confirmation.</p>
+
+    <div class="spinner"></div>
+
+    <div class="status" id="statusBox">Checking payment...</div>
+
+    <button class="btn" id="manualBtn" onclick="connectInternet()">Connect Internet</button>
+
+    <div class="small">Checkout: <?php echo htmlspecialchars($checkout); ?></div>
+</div>
+
+<form id="loginForm" method="post" action="http://192.168.88.1/login" style="display:none;">
+    <input type="hidden" name="username" id="username">
+    <input type="hidden" name="password" id="password">
+    <input type="hidden" name="dst" id="dst" value="http://neverssl.com/">
+</form>
+
+<script>
+let tries = 0;
+let ready = false;
+
+function connectInternet(){
+    if(!ready) return;
+    document.getElementById("loginForm").submit();
+}
+
+async function checkPayment(){
+    tries++;
+
+    try{
+        const r = await fetch("check_payment.php?checkout_id=<?php echo urlencode($checkout); ?>&t="+Date.now(), {cache:"no-store"});
+        const d = await r.json();
+
+        if(d.status === "paid"){
+            document.getElementById("statusBox").innerHTML = "✅ Payment confirmed. Connecting internet...";
+            document.getElementById("username").value = d.username || "";
+            document.getElementById("password").value = d.password || "";
+
+            if(d.login_url){
+                document.getElementById("loginForm").action = d.login_url;
+            }
+
+            if(d.dst){
+                document.getElementById("dst").value = d.dst;
+            }
+
+            ready = true;
+            document.getElementById("manualBtn").style.display = "block";
+
+            setTimeout(connectInternet, 1500);
+            return;
+        }
+
+        if(d.status === "failed"){
+            document.getElementById("statusBox").innerHTML = "❌ Payment failed. Redirecting...";
+            setTimeout(()=>window.location.href="index.php",2500);
+            return;
+        }
+
+        if(d.status === "error"){
+            document.getElementById("statusBox").innerHTML = "Activation error: " + (d.message || "Unknown");
+            setTimeout(checkPayment,3000);
+            return;
+        }
+
+        document.getElementById("statusBox").innerHTML = "Waiting for confirmation... " + tries;
+        setTimeout(checkPayment,2500);
+
+    }catch(e){
+        document.getElementById("statusBox").innerHTML = "Connection issue. Retrying... " + tries;
+        setTimeout(checkPayment,2500);
+    }
+}
+
+checkPayment();
+</script>
+
+</body>
+</html>

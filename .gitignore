@@ -1,0 +1,12 @@
+*.log
+vendor/
+node_modules/
+.env
+config/database.php
+config/mikrotik.php
+mhakim-billing-system/config/database.php
+mhakim-billing-system/config/mikrotik.php
+*.tar.gz
+*.bak
+*.backup
+*.save

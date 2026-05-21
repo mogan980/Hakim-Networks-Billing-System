@@ -1,0 +1,282 @@
+<?php
+require_once "config/database.php";
+require_once "/var/www/html/vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+$error = "";
+$message = "";
+$routerId = $_GET["router_id"] ?? null;
+
+$routers = $pdo->query("SELECT * FROM routers ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+if (!$routerId && !empty($routers)) {
+    $routerId = $routers[0]["id"];
+}
+
+$router = null;
+$hotspotActive = [];
+$pppoeActive = [];
+$dbClients = [];
+// Disconnect hotspot user
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["disconnect_hotspot"])) {
+
+    try {
+
+        $routerIdPost = $_POST["router_id"] ?? null;
+
+        $stmt = $pdo->prepare("SELECT * FROM routers WHERE id=? LIMIT 1");
+        $stmt->execute([$routerIdPost]);
+        $routerControl = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$routerControl) {
+            throw new Exception("Router not found.");
+        }
+
+        $apiControl = new Client(new Config([
+            "host" => $routerControl["router_ip"],
+            "user" => $routerControl["router_username"],
+            "pass" => $routerControl["router_password"],
+            "port" => (int)$routerControl["api_port"],
+        ]));
+
+        $sessionId = trim($_POST["session_id"] ?? "");
+
+        $apiControl->query(
+            (new Query("/ip/hotspot/active/remove"))
+                ->equal(".id", $sessionId)
+        )->read();
+
+        $message = "Hotspot user disconnected successfully.";
+
+    } catch (Exception $e) {
+
+        $error = $e->getMessage();
+
+    }
+
+}
+try {
+    if ($routerId) {
+        $stmt = $pdo->prepare("SELECT * FROM routers WHERE id=? LIMIT 1");
+        $stmt->execute([$routerId]);
+        $router = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($router) {
+            $api = new Client(new Config([
+                "host" => $router["router_ip"],
+                "user" => $router["router_username"],
+                "pass" => $router["router_password"],
+                "port" => (int)$router["api_port"],
+            ]));
+
+            $hotspotActive = $api->query(new Query("/ip/hotspot/active/print"))->read();
+            $pppoeActive = $api->query(new Query("/ppp/active/print"))->read();
+        }
+    }
+
+    $dbClients = $pdo->query("
+        SELECT id, full_name, phone, username, status, connection_type, expires_at
+        FROM clients
+        ORDER BY id DESC
+        LIMIT 100
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+} catch (Exception $e) {
+    $error = $e->getMessage();
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>NOC Router Management</title>
+<link rel="stylesheet" href="assets/pro-sidebar.css">
+<style>
+body{font-family:Arial;background:#f1f5f9;margin:0;color:#0f172a}
+.sidebar{width:260px;position:fixed;top:0;left:0;height:100vh;background:#020617;color:white;padding:18px}
+.sidebar a{display:block;color:#e5e7eb;text-decoration:none;padding:11px;border-radius:10px;margin:5px 0}
+.sidebar .active,.sidebar a:hover{background:#1e293b}
+.main{margin-left:280px;padding:25px}
+.card{background:white;border-radius:18px;padding:20px;margin-bottom:18px;box-shadow:0 10px 28px rgba(0,0,0,.08)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px}
+.stat h3{margin:0;color:#64748b;font-size:14px}
+.stat strong{display:block;font-size:30px;margin-top:8px}
+select{padding:12px;border-radius:10px;border:1px solid #cbd5e1}
+table{width:100%;border-collapse:collapse}
+th{background:#020617;color:white;padding:12px;text-align:left}
+td{padding:12px;border-bottom:1px solid #e5e7eb}
+.badge{padding:6px 10px;border-radius:999px;font-size:12px;font-weight:800}
+.online{background:#dcfce7;color:#166534}
+.offline{background:#fee2e2;color:#991b1b}
+.warning{background:#fef3c7;color:#92400e}
+@media(max-width:900px){.main{margin-left:0}.grid{grid-template-columns:1fr}.sidebar{position:relative;width:100%;height:auto}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+<h2>M.Hakim</h2>
+<p>ISP NOC</p>
+<a href="noc_final_clean.php">Dashboard</a>
+<a class="active" href="noc.php">NOC Center</a>
+<a href="routers.php">Routers</a>
+<a href="clients.php">Clients</a>
+<a href="pppoe.php">PPPoE</a>
+<a href="mikrotik.php">MikroTik</a>
+<a href="backups.php">Backups</a>
+<a href="payments.php">Payments</a>
+<a href="logout.php">Logout</a>
+</div>
+
+<div class="main">
+<h1>NOC Router Management</h1>
+<p>Monitor routers, online users, PPPoE sessions, hotspot sessions, and client status.</p>
+<?php if($message): ?>
+<div class="card" style="background:#dcfce7;color:#166534;">
+<?php echo htmlspecialchars($message); ?>
+</div>
+<?php endif; ?>
+<?php if($error): ?>
+<div class="card" style="background:#fee2e2;color:#991b1b;"><?php echo htmlspecialchars($error); ?></div>
+<?php endif; ?>
+
+<div class="card">
+<form method="GET">
+<label><strong>Select Router/Site:</strong></label>
+<select name="router_id" onchange="this.form.submit()">
+<?php foreach($routers as $r): ?>
+<option value="<?php echo $r["id"]; ?>" <?php echo $routerId == $r["id"] ? "selected" : ""; ?>>
+<?php echo htmlspecialchars($r["router_name"] . " - " . $r["location"]); ?>
+</option>
+<?php endforeach; ?>
+</select>
+</form>
+</div>
+
+<div class="grid">
+<div class="card stat">
+<h3>Router Status</h3>
+<strong><?php echo $router && !$error ? "Online" : "Offline"; ?></strong>
+</div>
+
+<div class="card stat">
+<h3>Hotspot Online</h3>
+<strong><?php echo count($hotspotActive); ?></strong>
+</div>
+
+<div class="card stat">
+<h3>PPPoE Online</h3>
+<strong><?php echo count($pppoeActive); ?></strong>
+</div>
+
+<div class="card stat">
+<h3>Known Clients</h3>
+<strong><?php echo count($dbClients); ?></strong>
+</div>
+</div>
+
+<div class="card">
+<h2>Online Hotspot Users</h2>
+<table>
+<thead>
+<tr>
+<th>User</th>
+<th>IP</th>
+<th>MAC</th>
+<th>Uptime</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<?php foreach($hotspotActive as $u): ?>
+<tr>
+<td><?php echo htmlspecialchars($u["user"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($u["address"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($u["mac-address"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($u["uptime"] ?? "-"); ?></td>
+<td>
+<form method="POST">
+<input type="hidden" name="disconnect_hotspot" value="1">
+<input type="hidden" name="router_id" value="<?php echo htmlspecialchars($routerId); ?>">
+<input type="hidden" name="session_id" value="<?php echo htmlspecialchars($u[".id"] ?? ""); ?>">
+
+<button type="submit" style="
+background:#dc2626;
+color:white;
+border:0;
+padding:8px 12px;
+border-radius:8px;
+cursor:pointer;
+font-weight:bold;
+">
+Disconnect
+</button>
+</form>
+</td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+</table>
+</div>
+
+<div class="card">
+<h2>Online PPPoE Users</h2>
+<table>
+<thead>
+<tr>
+<th>User</th>
+<th>IP</th>
+<th>Caller ID</th>
+<th>Uptime</th>
+</tr>
+</thead>
+<tbody>
+<?php foreach($pppoeActive as $p): ?>
+<tr>
+<td><?php echo htmlspecialchars($p["name"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($p["address"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($p["caller-id"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($p["uptime"] ?? "-"); ?></td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+</table>
+</div>
+
+<div class="card">
+<h2>Client Registry</h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Phone</th>
+<th>Username</th>
+<th>Type</th>
+<th>Status</th>
+<th>Expires</th>
+</tr>
+</thead>
+<tbody>
+<?php foreach($dbClients as $c): ?>
+<tr>
+<td><?php echo htmlspecialchars($c["full_name"]); ?></td>
+<td><?php echo htmlspecialchars($c["phone"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($c["username"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($c["connection_type"] ?? "hotspot"); ?></td>
+<td>
+<span class="badge <?php echo $c["status"] === "active" ? "online" : "offline"; ?>">
+<?php echo htmlspecialchars($c["status"]); ?>
+</span>
+</td>
+<td><?php echo htmlspecialchars($c["expires_at"] ?? "Not set"); ?></td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+</table>
+</div>
+
+</div>
+</body>
+</html>

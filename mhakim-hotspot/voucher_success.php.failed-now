@@ -1,0 +1,75 @@
+<?php
+$username = $_GET["u"] ?? "";
+$password = $_GET["p"] ?? "";
+
+if (!$username || !$password) {
+    die("Missing login details.");
+}
+
+$loginUrl = "http://login.hakim/login";
+$dst = "http://neverssl.com";
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Voucher Activated</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:linear-gradient(135deg,#020617,#052e2b,#064e3b);
+    color:white;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+.box{
+    width:92%;
+    max-width:420px;
+    background:#0f172a;
+    padding:30px;
+    border-radius:22px;
+    text-align:center;
+    box-shadow:0 25px 60px rgba(0,0,0,.45);
+}
+h1{color:#22c55e}
+.btn{
+    display:inline-block;
+    margin-top:15px;
+    padding:13px 18px;
+    background:#22c55e;
+    color:#052e16;
+    text-decoration:none;
+    border-radius:12px;
+    font-weight:bold;
+    border:0;
+}
+small{color:#94a3b8}
+</style>
+</head>
+<body>
+
+<div class="box">
+    <h1>Voucher Activated ✅</h1>
+    <p>Logging you in automatically...</p>
+    <small>Username: <?php echo htmlspecialchars($username); ?></small>
+
+    <form id="loginForm" method="post" action="<?php echo $loginUrl; ?>">
+        <input type="hidden" name="username" value="<?php echo htmlspecialchars($username); ?>">
+        <input type="hidden" name="password" value="<?php echo htmlspecialchars($password); ?>">
+        <input type="hidden" name="dst" value="<?php echo $dst; ?>">
+        <button class="btn" type="submit">Continue to Internet</button>
+    </form>
+</div>
+
+<script>
+setTimeout(function(){
+    document.getElementById("loginForm").submit();
+}, 1500);
+</script>
+
+</body>
+</html>

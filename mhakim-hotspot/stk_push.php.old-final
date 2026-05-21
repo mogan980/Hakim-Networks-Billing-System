@@ -1,0 +1,194 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once "/var/www/html/mhakim-billing-system/config/database.php";
+
+$package_id = $_POST["package_id"] ?? "";
+$phoneInput  = trim($_POST["phone"] ?? "");
+$clientIp = $_POST["client_ip"] ?? ($_SERVER["REMOTE_ADDR"] ?? "");
+
+if (!$package_id || !$phoneInput) {
+    die("Package or phone missing.");
+}
+
+$pkg = $pdo->prepare("SELECT * FROM packages WHERE id=? AND status='active' LIMIT 1");
+$pkg->execute([$package_id]);
+$package = $pkg->fetch(PDO::FETCH_ASSOC);
+
+if (!$package) {
+    die("Invalid package.");
+}
+
+$phone254 = preg_replace('/\D/', '', $phoneInput);
+
+if (preg_match('/^0/', $phone254)) {
+    $phone254 = preg_replace('/^0/', '254', $phone254);
+}
+
+if (preg_match('/^7/', $phone254)) {
+    $phone254 = "254" . $phone254;
+}
+
+$username = $phone254;
+$password = substr($phone254, -4);
+
+$mpesa = $pdo->query("
+    SELECT *
+    FROM mpesa_settings
+    WHERE status='active'
+    ORDER BY id DESC
+    LIMIT 1
+")->fetch(PDO::FETCH_ASSOC);
+
+if (!$mpesa) {
+    die("M-Pesa settings missing.");
+}
+
+$env = strtolower($mpesa["environment"] ?? "sandbox");
+
+$baseUrl = $env === "live"
+    ? "https://api.safaricom.co.ke"
+    : "https://sandbox.safaricom.co.ke";
+
+$credentials = base64_encode(trim($mpesa["consumer_key"]) . ":" . trim($mpesa["consumer_secret"]));
+
+$ch = curl_init($baseUrl . "/oauth/v1/generate?grant_type=client_credentials");
+curl_setopt_array($ch, [
+    CURLOPT_HTTPHEADER => [
+        "Authorization: Basic " . $credentials,
+        "Accept: application/json"
+    ],
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT => 30,
+]);
+
+$tokenRaw = curl_exec($ch);
+$tokenErr = curl_error($ch);
+curl_close($ch);
+
+$tokenData = json_decode($tokenRaw, true);
+$accessToken = $tokenData["access_token"] ?? null;
+
+if (!$accessToken) {
+    die("M-Pesa token failed: " . htmlspecialchars($tokenErr ?: $tokenRaw));
+}
+
+$timestamp = date("YmdHis");
+$shortcode = trim($mpesa["shortcode"]);
+$passkey   = trim($mpesa["passkey"]);
+$callback  = trim($mpesa["callback_url"]);
+
+$passwordDaraja = base64_encode($shortcode . $passkey . $timestamp);
+
+$amount = (int)$package["price"];
+
+if ($amount < 1) {
+    $amount = 1;
+}
+
+$stkData = [
+    "BusinessShortCode" => $shortcode,
+    "Password" => $passwordDaraja,
+    "Timestamp" => $timestamp,
+    "TransactionType" => "CustomerPayBillOnline",
+    "Amount" => $amount,
+    "PartyA" => $phone254,
+    "PartyB" => $shortcode,
+    "PhoneNumber" => $phone254,
+    "CallBackURL" => $callback,
+    "AccountReference" => "HAKIM-" . $package["id"],
+    "TransactionDesc" => "Hakim Networks " . $package["name"]
+];
+
+$ch = curl_init($baseUrl . "/mpesa/stkpush/v1/processrequest");
+curl_setopt_array($ch, [
+    CURLOPT_HTTPHEADER => [
+        "Content-Type: application/json",
+        "Authorization: Bearer " . $accessToken
+    ],
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => json_encode($stkData),
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT => 30,
+]);
+
+$stkRaw = curl_exec($ch);
+$stkErr = curl_error($ch);
+curl_close($ch);
+
+$stk = json_decode($stkRaw, true);
+
+$checkoutId = $stk["CheckoutRequestID"] ?? null;
+
+if (!$checkoutId) {
+    die("STK push failed: " . htmlspecialchars($stkErr ?: $stkRaw));
+}
+
+$durationHours = (float)($package["duration_hours"] ?? 1);
+
+if ($durationHours <= 0) {
+    $durationHours = 1;
+}
+
+$expiresAt = date("Y-m-d H:i:s", strtotime("+{$durationHours} hours"));
+
+try {
+
+    $pdo->beginTransaction();
+
+    $clientStmt = $pdo->prepare("
+        INSERT INTO clients
+        (full_name, phone, username, password, package_id, status, starts_at, expires_at, client_ip, connection_type)
+        VALUES (?, ?, ?, ?, ?, 'pending', NOW(), ?, ?, 'hotspot')
+        ON DUPLICATE KEY UPDATE
+            phone=VALUES(phone),
+            password=VALUES(password),
+            package_id=VALUES(package_id),
+            status='pending',
+            starts_at=NOW(),
+            expires_at=VALUES(expires_at),
+            client_ip=VALUES(client_ip),
+            connection_type='hotspot'
+    ");
+
+    $clientStmt->execute([
+        $phone254,
+        $phone254,
+        $username,
+        $password,
+        $package_id,
+        $expiresAt,
+        $clientIp
+    ]);
+
+    $payStmt = $pdo->prepare("
+        INSERT INTO payments
+        (phone, amount, status, checkout_id, created_at)
+        VALUES (?, ?, 'pending', ?, NOW())
+        ON DUPLICATE KEY UPDATE
+            phone=VALUES(phone),
+            amount=VALUES(amount),
+            status='pending',
+            mpesa_receipt=NULL,
+            created_at=NOW()
+    ");
+
+    $payStmt->execute([
+        $phone254,
+        $amount,
+        $checkoutId
+    ]);
+
+    $pdo->commit();
+
+} catch (Exception $e) {
+
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    die("Database error: " . htmlspecialchars($e->getMessage()));
+}
+
+header("Location: wait_payment.php?checkout_id=" . urlencode($checkoutId));
+exit;
