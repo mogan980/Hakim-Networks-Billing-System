@@ -1,0 +1,7 @@
+*.log
+*.json
+router_status_cache.json
+expire_clients.log
+queue_sync.log
+tmp/
+cache/
