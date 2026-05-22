@@ -1,0 +1,65 @@
+/* Professional grouped sidebar UI/UX */
+
+.sidebar{
+  background:linear-gradient(180deg,#020617,#062c2a) !important;
+  padding:18px 14px !important;
+  overflow-y:auto !important;
+}
+
+.sidebar h2,
+.sidebar .brand,
+.sidebar-logo{
+  margin-bottom:18px !important;
+}
+
+.sidebar a{
+  display:flex !important;
+  align-items:center !important;
+  gap:10px !important;
+  min-height:42px !important;
+  padding:11px 14px !important;
+  margin:6px 0 !important;
+  border-radius:13px !important;
+  background:#111827 !important;
+  color:#f8fafc !important;
+  text-decoration:none !important;
+  font-weight:800 !important;
+  font-size:14px !important;
+  transition:.2s ease !important;
+}
+
+.sidebar a:hover{
+  background:#14532d !important;
+  transform:translateX(3px);
+}
+
+.sidebar a.active,
+.sidebar a[href*="noc_final_clean"],
+.sidebar a[href*="live_noc"]{
+  background:#16a34a !important;
+  color:white !important;
+}
+
+.sidebar-group-title{
+  margin:18px 8px 8px;
+  font-size:11px;
+  font-weight:900;
+  color:#94a3b8;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+
+.sidebar-divider{
+  height:1px;
+  background:rgba(148,163,184,.18);
+  margin:14px 4px;
+}
+
+.sidebar::-webkit-scrollbar{
+  width:6px;
+}
+
+.sidebar::-webkit-scrollbar-thumb{
+  background:#64748b;
+  border-radius:999px;
+}

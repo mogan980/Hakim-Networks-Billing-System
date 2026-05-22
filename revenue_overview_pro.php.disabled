@@ -1,0 +1,75 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+require_once __DIR__ . "/config/database.php";
+
+function rv($pdo,$sql){
+    try{
+        $v=$pdo->query($sql)->fetchColumn();
+        return is_numeric($v) ? (float)$v : 0;
+    }catch(Exception $e){
+        return 0;
+    }
+}
+function cnt($pdo,$table){
+    try{
+        return (int)$pdo->query("SELECT COUNT(*) FROM `$table`")->fetchColumn();
+    }catch(Exception $e){
+        return 0;
+    }
+}
+function money($n){ return "Ksh ".number_format((float)$n,0); }
+
+$today=rv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(created_at)=CURDATE()");
+$week=rv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND YEARWEEK(created_at,1)=YEARWEEK(CURDATE(),1)");
+$month=rv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())");
+$total=rv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'");
+
+$clients=cnt($pdo,"clients");
+$packages=cnt($pdo,"packages");
+$vouchers=cnt($pdo,"smart_vouchers");
+?>
+<style>
+.rev-clean{background:#fff;border-radius:24px;padding:24px;margin:18px 0;box-shadow:0 18px 45px rgba(15,23,42,.08);border:1px solid #e2e8f0;font-family:Inter,Arial,sans-serif;color:#071327}
+.rev-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.rev-head h2{margin:0;font-size:24px;font-weight:900}.rev-head p{margin:5px 0 0;color:#64748b}
+.rev-toggle{border:1px solid #dbe4ef;background:#fff;border-radius:14px;padding:10px 14px;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.08)}
+.rev-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.rev-card{border-radius:18px;padding:18px;min-height:132px;box-shadow:0 10px 22px rgba(15,23,42,.06);position:relative;overflow:hidden}
+.rev-card:after{content:"";position:absolute;right:-28px;top:-28px;width:100px;height:100px;background:rgba(255,255,255,.45);border-radius:50%}
+.rev-card h4{margin:0 0 10px;font-size:13px;color:#475569}.rev-money{font-size:25px;font-weight:950}.rev-card p{margin:8px 0 0;color:#526072;font-weight:700;font-size:13px}
+.rg{background:linear-gradient(135deg,#dcfce7,#bbf7d0)}.rb{background:linear-gradient(135deg,#dbeafe,#bfdbfe)}.ry{background:linear-gradient(135deg,#fef3c7,#fde68a)}.rp{background:linear-gradient(135deg,#ede9fe,#ddd6fe)}
+.rev-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+.rev-mini div{border:1px solid #e2e8f0;border-radius:14px;padding:12px 16px;font-weight:900}
+.rev-mini span{float:right;color:#16a34a}
+.rev-hidden .rev-money,.rev-hidden .rev-mini span{filter:blur(8px);user-select:none}
+@media(max-width:900px){.rev-grid{grid-template-columns:1fr 1fr}.rev-mini{grid-template-columns:1fr}}
+</style>
+
+<section class="rev-clean" id="revClean">
+  <div class="rev-head">
+    <div><h2>💰 Revenue Performance</h2><p>Live payment summary from your billing system.</p></div>
+    <button class="rev-toggle" onclick="revToggle()">👁 <span id="revToggleText">Hide Numbers</span></button>
+  </div>
+
+  <div class="rev-grid">
+    <div class="rev-card rg"><h4>Today Revenue</h4><div class="rev-money"><?=money($today)?></div><p>Collected today</p></div>
+    <div class="rev-card rb"><h4>This Week</h4><div class="rev-money"><?=money($week)?></div><p>Current week total</p></div>
+    <div class="rev-card ry"><h4>This Month</h4><div class="rev-money"><?=money($month)?></div><p>Monthly revenue</p></div>
+    <div class="rev-card rp"><h4>Total Revenue</h4><div class="rev-money"><?=money($total)?></div><p>All-time collections</p></div>
+  </div>
+
+  <div class="rev-mini">
+    <div>Total Clients <span><?=$clients?></span></div>
+    <div>Packages <span><?=$packages?></span></div>
+    <div>Vouchers <span><?=$vouchers?></span></div>
+  </div>
+</section>
+
+<script>
+function revToggle(){
+ const box=document.getElementById("revClean");
+ const txt=document.getElementById("revToggleText");
+ box.classList.toggle("rev-hidden");
+ txt.textContent=box.classList.contains("rev-hidden")?"Show Numbers":"Hide Numbers";
+}
+</script>

@@ -1,0 +1,178 @@
+<?php
+require_once __DIR__ . '/access_guard.php';
+require_once "config/database.php";
+
+$message = "";
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $stmt = $pdo->prepare("
+        INSERT INTO routers(router_name, router_ip, router_username, router_password, api_port, location, status)
+        VALUES(?,?,?,?,?,?, 'active')
+    ");
+
+    $stmt->execute([
+        $_POST["router_name"],
+        $_POST["router_ip"],
+        $_POST["router_username"],
+        $_POST["router_password"],
+        $_POST["api_port"],
+        $_POST["location"]
+    ]);
+
+    $message = "Router added successfully.";
+}
+
+$routers = $pdo->query("SELECT * FROM routers ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Routers</title>
+<style>
+body{font-family:Arial;background:#f1f5f9;margin:0;color:#0f172a}
+.sidebar{width:240px;position:fixed;top:0;left:0;height:100vh;background:#020617;color:white;padding:20px}
+.sidebar a{display:block;color:#e5e7eb;text-decoration:none;padding:12px;border-radius:10px;margin:6px 0}
+.sidebar a:hover,.sidebar .active{background:#1e293b}
+.main{margin-left:280px;padding:25px}
+.card{background:white;padding:22px;border-radius:18px;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+input{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;margin-bottom:12px}
+button{padding:12px 18px;border:0;border-radius:10px;background:#16a34a;color:white;font-weight:bold}
+table{width:100%;border-collapse:collapse;background:white}
+th,td{padding:12px;border-bottom:1px solid #e5e7eb;text-align:left}
+th{background:#0f172a;color:white}
+.success{background:#dcfce7;color:#166534;padding:12px;border-radius:10px}
+.badge{padding:6px 10px;border-radius:999px;background:#dcfce7;color:#166534;font-size:12px;font-weight:bold}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+@media(max-width:900px){.sidebar{position:relative;width:auto;height:auto}.main{margin-left:0}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+<h2>M.Hakim</h2>
+<a href="noc_final_clean.php">Dashboard</a>
+<a href="noc.php">NOC Center</a>
+<a href="clients.php">Clients</a>
+<a href="packages.php">Packages</a>
+<a href="vouchers.php">Vouchers</a>
+<a href="payments.php">Payments</a>
+<a href="analytics.php">Analytics</a>
+<a href="health_check.php">Health Check</a>
+<a href="pppoe.php">PPPoE</a>
+<a class="active" href="routers.php">Routers</a>
+<a href="mikrotik.php">MikroTik</a>
+<a href="backups.php">Backups</a>
+<a href="users.php">Users</a>
+<a href="reports.php">Reports</a>
+<a href="logout.php">Logout</a>
+</div>
+
+<div class="main">
+<h1>Routers Management</h1>
+<p>Manage multiple MikroTik routers/sites from one billing system.</p>
+
+<?php if($message): ?><p class="success"><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
+
+<div class="card">
+<h2>Add Router</h2>
+<form method="POST">
+<div class="grid">
+    <input name="router_name" placeholder="Router Name e.g. Site 1 Router" required>
+    <input name="router_ip" placeholder="Router IP e.g. 192.168.88.1" required>
+    <input name="router_username" placeholder="API Username" required>
+    <input name="router_password" placeholder="API Password" required>
+    <input name="api_port" placeholder="API Port" value="8728" required>
+    <input name="location" placeholder="Location e.g. Ruiru Plot">
+</div>
+<button type="submit">Add Router</button>
+</form>
+</div>
+
+<div class="card">
+<h2>Registered Routers</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Name</th>
+<th>IP</th>
+<th>Port</th>
+<th>Location</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<?php foreach($routers as $r): ?>
+<tr>
+<td><?php echo htmlspecialchars($r["id"]); ?></td>
+<td><?php echo htmlspecialchars($r["router_name"]); ?></td>
+<td><?php echo htmlspecialchars($r["router_ip"]); ?></td>
+<td><?php echo htmlspecialchars($r["api_port"]); ?></td>
+<td><?php echo htmlspecialchars($r["location"]); ?></td>
+<td><span class="badge"><?php echo htmlspecialchars($r["status"]); ?></span></td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+</table>
+</div>
+
+</div>
+
+<style>
+.sidebar{
+    width:260px !important;
+    height:100vh !important;
+    position:fixed !important;
+    left:0 !important;
+    top:0 !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    background:linear-gradient(180deg,#020617,#071827,#052e2b) !important;
+    padding:18px 12px !important;
+    scrollbar-width:thin;
+    scrollbar-color:#22c55e #020617;
+}
+.sidebar::-webkit-scrollbar{width:6px;}
+.sidebar::-webkit-scrollbar-track{background:#020617;}
+.sidebar::-webkit-scrollbar-thumb{background:#22c55e;border-radius:20px;}
+.sidebar h2{font-size:22px !important;margin:0 0 4px !important;color:#fff !important;}
+.sidebar p{font-size:12px !important;color:#94a3b8 !important;margin:0 0 14px !important;}
+.sidebar a{
+    display:flex !important;
+    align-items:center !important;
+    gap:10px !important;
+    padding:10px 12px !important;
+    margin:4px 0 !important;
+    border-radius:12px !important;
+    color:#dbeafe !important;
+    font-size:13px !important;
+    font-weight:700 !important;
+    text-decoration:none !important;
+    transition:.25s !important;
+    white-space:nowrap !important;
+}
+.sidebar a:hover,.sidebar a.active,.sidebar .active{
+    background:rgba(34,197,94,.18) !important;
+    color:#fff !important;
+    transform:translateX(4px);
+}
+.sidebar a[href*="dashboard"]::before{content:"📊";}
+.sidebar a[href*="clients"]::before{content:"👥";}
+.sidebar a[href*="packages"]::before{content:"📦";}
+.sidebar a[href*="vouchers"]::before{content:"🎟️";}
+.sidebar a[href*="payments"]::before{content:"💳";}
+.sidebar a[href*="pppoe"]::before{content:"🌐";}
+.sidebar a[href*="routers"]::before{content:"🛰️";}
+.sidebar a[href*="mikrotik"]::before{content:"📡";}
+.sidebar a[href*="backups"]::before{content:"🛡️";}
+.sidebar a[href*="reports"]::before{content:"📈";}
+.sidebar a[href*="logout"]::before{content:"🚪";}
+.main{margin-left:280px !important;}
+@media(max-width:900px){
+    .sidebar{position:relative !important;width:100% !important;height:auto !important;max-height:60vh !important;}
+    .main{margin-left:0 !important;}
+}
+</style>
+
+</body>
+</html>

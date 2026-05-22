@@ -1,0 +1,11 @@
+{
+    "status": "online",
+    "online": true,
+    "identity": "MikroTik",
+    "host": "192.168.88.1",
+    "last_success": 1779445615,
+    "last_check": 1779445615,
+    "fail_count": 0,
+    "message": "Connected",
+    "time": "2026-05-22 13:26:56"
+}

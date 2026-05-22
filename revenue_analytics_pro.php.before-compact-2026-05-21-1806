@@ -1,0 +1,87 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+require_once __DIR__ . "/config/database.php";
+
+function dbv($pdo,$sql){
+    $v = $pdo->query($sql)->fetchColumn();
+    return $v === false || $v === null ? 0 : $v;
+}
+function cash($n){ return "Ksh " . number_format((float)$n,0); }
+
+$total = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'");
+$month = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())");
+$today = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(created_at)=CURDATE()");
+$stk = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND method IN ('mpesa','stk','M-PESA')");
+$voucher = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND method='voucher'");
+$pppoe = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND method='pppoe'");
+$hotspot = dbv($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND (method='hotspot' OR method='cash')");
+
+$max = max($today,$month,$total,$stk,$voucher,$pppoe,$hotspot,1);
+?>
+<style>
+.revenue-analytics-pro{background:#fff;border-radius:24px;padding:26px;margin:24px 0;box-shadow:0 18px 45px rgba(15,23,42,.08);border:1px solid #e2e8f0;font-family:Inter,Arial,sans-serif}
+.ra-head{display:flex;justify-content:space-between;align-items:center}
+.ra-head h2{margin:0;font-size:26px;font-weight:900;color:#0f172a}
+.ra-head p{margin:6px 0 0;color:#64748b}
+.ra-live{background:#dcfce7;color:#166534;border-radius:999px;padding:9px 15px;font-weight:900}
+.ra-toggle{border:1px solid #dbe4ef;background:#fff;border-radius:15px;padding:11px 15px;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.08)}
+.ra-top{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}
+.ra-box{border:1px solid #e2e8f0;border-radius:16px;padding:16px;background:#fff}
+.ra-box b{display:block;font-size:22px;color:#0f172a}
+.ra-box span{color:#526072;font-weight:700}
+.ra-breakdown{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0 28px}
+.ra-mini{border-radius:16px;padding:16px;background:#f8fafc;border:1px solid #e2e8f0}
+.ra-mini b{display:block;font-size:20px}
+.ra-chart{height:235px;display:flex;align-items:end;gap:24px;border-left:1px solid #d9e1ea;border-bottom:1px solid #d9e1ea;padding-left:26px;margin:28px 16px}
+.ra-bar-wrap{flex:1;text-align:center}
+.ra-bar{width:75%;margin:auto;background:linear-gradient(180deg,#60a5fa,#2563eb);border:2px solid #1683ff;border-radius:6px 6px 0 0}
+.ra-label{margin-top:10px;color:#475569;font-size:13px}
+.ra-hidden .ra-money{filter:blur(8px);user-select:none}
+@media(max-width:900px){.ra-top,.ra-breakdown{grid-template-columns:1fr}.ra-chart{gap:10px;margin:20px 5px}}
+</style>
+
+<section class="revenue-analytics-pro" id="revenueAnalyticsPro">
+  <div class="ra-head">
+    <div>
+      <h2>📈 Revenue Analytics</h2>
+      <p>Real-time revenue from STK, vouchers, PPPoE and hotspot payments.</p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span class="ra-live">● Live</span>
+      <button class="ra-toggle" onclick="toggleRevenueSafe()">👁 <span id="raToggleText">Hide Numbers</span></button>
+    </div>
+  </div>
+
+  <div class="ra-top">
+    <div class="ra-box"><b class="ra-money"><?=cash($total)?></b><span>Total Revenue</span></div>
+    <div class="ra-box"><b class="ra-money"><?=cash($month)?></b><span>This Month</span></div>
+    <div class="ra-box"><b class="ra-money"><?=cash($today)?></b><span>Today</span></div>
+  </div>
+
+  <div class="ra-breakdown">
+    <div class="ra-mini"><b class="ra-money"><?=cash($stk)?></b><span>STK / M-PESA</span></div>
+    <div class="ra-mini"><b class="ra-money"><?=cash($voucher)?></b><span>Vouchers</span></div>
+    <div class="ra-mini"><b class="ra-money"><?=cash($pppoe)?></b><span>PPPoE</span></div>
+    <div class="ra-mini"><b class="ra-money"><?=cash($hotspot)?></b><span>Hotspot / Cash</span></div>
+  </div>
+
+  <div class="ra-chart">
+    <?php foreach(["Today"=>$today,"Month"=>$month,"STK"=>$stk,"Voucher"=>$voucher,"PPPoE"=>$pppoe,"Hotspot"=>$hotspot,"Total"=>$total] as $label=>$amount):
+      $h=max(5,($amount/$max)*200);
+    ?>
+      <div class="ra-bar-wrap">
+        <div class="ra-bar" style="height:<?=$h?>px"></div>
+        <div class="ra-label"><?=$label?></div>
+      </div>
+    <?php endforeach; ?>
+  </div>
+</section>
+
+<script>
+function toggleRevenueSafe(){
+  const box=document.getElementById("revenueAnalyticsPro");
+  const txt=document.getElementById("raToggleText");
+  box.classList.toggle("ra-hidden");
+  txt.textContent = box.classList.contains("ra-hidden") ? "Show Numbers" : "Hide Numbers";
+}
+</script>

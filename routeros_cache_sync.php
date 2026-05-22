@@ -1,0 +1,115 @@
+<?php
+require_once __DIR__ . "/vendor/autoload.php";
+require_once __DIR__ . "/config/database.php";
+
+use RouterOS\Client;
+use RouterOS\Config;
+use RouterOS\Query;
+
+date_default_timezone_set("Africa/Nairobi");
+
+$companies = $pdo->query("
+    SELECT *
+    FROM super_admin_router
+    WHERE router_ip IS NOT NULL
+    AND router_ip != ''
+")->fetchAll(PDO::FETCH_ASSOC);
+
+foreach ($companies as $c) {
+
+    $companyId = (int)$c["id"];
+    $routerIp = $c["router_ip"];
+
+    try {
+
+        $client = new Client(new Config([
+            "host" => $routerIp,
+            "user" => $c["router_user"],
+            "pass" => $c["router_pass"],
+            "port" => (int)($c["router_port"] ?: 8728),
+            "timeout" => 5,
+        ]));
+
+        $identity = $client->query(new Query("/system/identity/print"))->read();
+        $resource = $client->query(new Query("/system/resource/print"))->read();
+        $hotspot = $client->query(new Query("/ip/hotspot/active/print"))->read();
+        $queues = $client->query(new Query("/queue/simple/print"))->read();
+
+        $traffic = $client->query(
+            (new Query("/interface/monitor-traffic"))
+                ->equal("interface", "ether1")
+                ->equal("once", "1")
+        )->read();
+
+        $rx = isset($traffic[0]) ? round(((float)($traffic[0]["rx-bits-per-second"] ?? 0)) / 1000000, 2) : 0;
+        $tx = isset($traffic[0]) ? round(((float)($traffic[0]["tx-bits-per-second"] ?? 0)) / 1000000, 2) : 0;
+
+        $routerName = $identity[0]["name"] ?? ($c["router_name"] ?? "MikroTik");
+        $cpu = ($resource[0]["cpu-load"] ?? "0") . "%";
+        $uptime = $resource[0]["uptime"] ?? "-";
+        $memory = $resource[0]["free-memory"] ?? "-";
+        $board = $resource[0]["board-name"] ?? "-";
+
+        $pdo->prepare("
+            INSERT INTO router_live_cache
+            (company_id, router_name, router_ip, status, rx_mbps, tx_mbps, active_users, simple_queues, cpu_load, uptime, free_memory, board, last_seen, last_error)
+            VALUES
+            (?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NULL)
+            ON DUPLICATE KEY UPDATE
+                router_name=VALUES(router_name),
+                router_ip=VALUES(router_ip),
+                status='online',
+                rx_mbps=VALUES(rx_mbps),
+                tx_mbps=VALUES(tx_mbps),
+                active_users=VALUES(active_users),
+                simple_queues=VALUES(simple_queues),
+                cpu_load=VALUES(cpu_load),
+                uptime=VALUES(uptime),
+                free_memory=VALUES(free_memory),
+                board=VALUES(board),
+                last_seen=NOW(),
+                last_error=NULL
+        ")->execute([
+            $companyId,
+            $routerName,
+            $routerIp,
+            $rx,
+            $tx,
+            count($hotspot),
+            count($queues),
+            $cpu,
+            $uptime,
+            $memory,
+            $board
+        ]);
+
+        $pdo->prepare("UPDATE companies SET online_status='online', last_seen=NOW() WHERE id=?")->execute([$companyId]);
+
+        $pdo->prepare("
+            INSERT INTO router_bandwidth(company_id, rx_mbps, tx_mbps, active_users, cpu_load)
+            VALUES(?,?,?,?,?)
+        ")->execute([$companyId, $rx, $tx, count($hotspot), $cpu]);
+
+        echo "ONLINE: {$c["router_name"]} RX={$rx} TX={$tx}\n";
+
+    } catch (Exception $e) {
+
+        $pdo->prepare("
+            INSERT INTO router_live_cache
+            (company_id, router_name, router_ip, status, last_error)
+            VALUES(?, ?, ?, 'offline', ?)
+            ON DUPLICATE KEY UPDATE
+                status='offline',
+                last_error=VALUES(last_error)
+        ")->execute([
+            $companyId,
+            $c["router_name"] ?? "MikroTik",
+            $routerIp,
+            $e->getMessage()
+        ]);
+
+        $pdo->prepare("UPDATE companies SET online_status='offline' WHERE id=?")->execute([$companyId]);
+
+        echo "OFFLINE: {$c["router_name"]} - {$e->getMessage()}\n";
+    }
+}

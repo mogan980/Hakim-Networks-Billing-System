@@ -1,0 +1,93 @@
+<?php
+session_start();
+require_once "config/database.php";
+
+$companyId = (int)($_GET["company_id"] ?? ($_SESSION["tenant_company_id"] ?? 0));
+
+if (!$companyId) {
+    header("Location: saas_auth.php");
+    exit;
+}
+
+$stmt = $pdo->prepare("SELECT * FROM companies WHERE id=? LIMIT 1");
+$stmt->execute([$companyId]);
+$company = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$company) {
+    die("Company not found.");
+}
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    // Temporary manual activation button for testing.
+    // Later this will be replaced with real M-Pesa callback.
+    $expires = date("Y-m-d H:i:s", strtotime("+1 month"));
+
+    $pdo->prepare("
+        INSERT INTO subscriptions(company_id, amount, status, starts_at, expires_at, created_at)
+        VALUES(?, 1000, 'paid', NOW(), ?, NOW())
+    ")->execute([$companyId, $expires]);
+
+    $pdo->prepare("UPDATE companies SET status='active' WHERE id=?")->execute([$companyId]);
+
+    $u = $pdo->prepare("
+        SELECT *
+        FROM tenant_users
+        WHERE company_id=?
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+
+    $u->execute([$companyId]);
+
+    $user = $u->fetch(PDO::FETCH_ASSOC);
+
+    if ($user) {
+
+        $_SESSION["tenant_user_id"] = $user["id"];
+        $_SESSION["tenant_role"] = $user["role"];
+        $_SESSION["tenant_company_id"] = $user["company_id"];
+        $_SESSION["tenant_name"] = $user["full_name"];
+
+        $_SESSION["user_id"] = $user["id"];
+        $_SESSION["role"] = $user["role"];
+        $_SESSION["name"] = $user["full_name"];
+    }
+
+    header("Location: tenant_noc_final_clean.php");
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Activate Billing Access</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;min-height:100vh;font-family:Arial;background:linear-gradient(135deg,#020617,#052e2b,#071827);color:white;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{width:100%;max-width:520px;background:rgba(15,23,42,.9);border:1px solid rgba(34,197,94,.18);border-radius:30px;padding:34px;box-shadow:0 30px 90px rgba(0,0,0,.45)}
+.logo{width:64px;height:64px;border-radius:20px;background:#22c55e;color:#052e16;display:grid;place-items:center;font-size:32px;font-weight:900;margin-bottom:18px}
+h1{color:#22c55e;margin:0 0 12px}
+p{color:#cbd5e1;line-height:1.6}
+.price{font-size:38px;font-weight:900;color:#22c55e;margin:20px 0}
+.feature{padding:13px;background:rgba(2,6,23,.65);border:1px solid rgba(148,163,184,.14);border-radius:15px;margin:9px 0}
+button{width:100%;padding:16px;border:0;border-radius:16px;background:linear-gradient(135deg,#22c55e,#86efac);color:#052e16;font-weight:900;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="logo">H</div>
+    <h1>Activate Your Billing System</h1>
+    <p>Company: <b><?php echo htmlspecialchars($company["company_name"] ?? ""); ?></b></p>
+    <div class="price">KES 1,000 / Month</div>
+
+    <div class="feature">✅ Access dashboard and client management</div>
+    <div class="feature">✅ M-Pesa billing and voucher tools</div>
+    <div class="feature">✅ Router wizard and MikroTik features</div>
+    <div class="feature">✅ Valid for one month after payment</div>
+
+    <form method="POST">
+        <button type="submit">Activate for 1 Month</button>
+    </form>
+</div>
+</body>
+</html>

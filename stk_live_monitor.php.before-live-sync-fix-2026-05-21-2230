@@ -1,0 +1,153 @@
+<?php
+require_once __DIR__ . "/config/database.php";
+
+$payments = $pdo->query("
+SELECT *
+FROM hotspot_payments
+ORDER BY id DESC
+LIMIT 300
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$totalPaid = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM hotspot_payments WHERE status='paid'")->fetchColumn();
+$todayPaid = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM hotspot_payments WHERE status='paid' AND DATE(paid_at)=CURDATE()")->fetchColumn();
+$pending = $pdo->query("SELECT COUNT(*) FROM hotspot_payments WHERE status='pending'")->fetchColumn();
+$paid = $pdo->query("SELECT COUNT(*) FROM hotspot_payments WHERE status='paid'")->fetchColumn();
+$failed = $pdo->query("SELECT COUNT(*) FROM hotspot_payments WHERE status='failed'")->fetchColumn();
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Live STK Monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="15">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#071018;color:#e2e8f0}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:260px;background:linear-gradient(180deg,#020617,#031b24);padding:24px;overflow:auto;border-right:1px solid rgba(255,255,255,.06)}
+.sidebar h2{color:#22c55e;margin-bottom:28px}
+.sidebar a{display:block;color:white;text-decoration:none;padding:13px 15px;border-radius:14px;margin:8px 0;font-weight:800}
+.sidebar a:hover,.sidebar .active{background:#16a34a;color:#052e16}
+.main{margin-left:280px;padding:32px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+.top h1{font-size:34px;margin:0}
+.live{background:#052e2b;border:1px solid #14532d;color:#86efac;padding:10px 16px;border-radius:999px;font-weight:900}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:22px}
+.card{background:linear-gradient(180deg,#0b1728,#08111d);border:1px solid #1f2937;border-radius:24px;padding:22px;box-shadow:0 18px 45px rgba(0,0,0,.22)}
+.card h3{color:#94a3b8;margin:0 0 15px}
+.big{font-size:36px;font-weight:900;color:#22c55e}
+.filters{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin:16px 0}
+input,select{width:100%;padding:13px;border-radius:14px;border:1px solid #334155;background:#020617;color:white}
+.tablewrap{overflow:auto}
+table{width:100%;border-collapse:collapse;min-width:1100px}
+th{background:#020617;padding:14px;text-align:left;white-space:nowrap}
+td{padding:14px;border-bottom:1px solid #1f2937;white-space:nowrap}
+.badge{padding:7px 12px;border-radius:999px;font-weight:900;font-size:12px}
+.paid{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}.failed{background:#fee2e2;color:#991b1b}
+small{color:#94a3b8}
+@media(max-width:900px){.sidebar{display:none}.main{margin-left:0}.grid,.filters{grid-template-columns:1fr}.top{display:block}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+<h2>M.Hakim</h2>
+<a href="noc_final_clean.php">📡 Live NOC</a>
+<a href="dashboard.php">📊 Dashboard</a>
+<a href="smart_vouchers.php">🎟 Smart Vouchers</a>
+<a href="payments.php">💰 Payments</a>
+<a href="packages.php">📦 Packages</a>
+<a href="routers.php">🛰 Routers</a>
+</div>
+
+<div class="main">
+<div class="top">
+<div>
+<h1>Live STK Session Monitor</h1>
+<small>Auto-refreshing M-Pesa STK payment sessions every 15 seconds.</small>
+</div>
+<div class="live">● Live Payments</div>
+</div>
+
+<div class="grid">
+<div class="card"><h3>Total Revenue</h3><div class="big">KES <?php echo number_format((float)$totalPaid); ?></div></div>
+<div class="card"><h3>Today</h3><div class="big">KES <?php echo number_format((float)$todayPaid); ?></div></div>
+<div class="card"><h3>Paid Sessions</h3><div class="big"><?php echo $paid; ?></div></div>
+<div class="card"><h3>Pending / Failed</h3><div class="big"><?php echo $pending; ?> / <?php echo $failed; ?></div></div>
+</div>
+
+<div class="card">
+<h2>Recent STK Sessions</h2>
+
+<div class="filters">
+<input id="searchBox" placeholder="Search phone, receipt, checkout, status...">
+<select id="statusFilter">
+<option value="">All Status</option>
+<option value="paid">Paid</option>
+<option value="pending">Pending</option>
+<option value="failed">Failed</option>
+</select>
+<select id="dateFilter">
+<option value="">All Dates</option>
+<option value="<?php echo date('Y-m-d'); ?>">Today</option>
+</select>
+</div>
+
+<button onclick="toggleRows()" id="toggleBtn" style="background:#22c55e;color:#052e16;border:0;padding:12px 18px;border-radius:14px;font-weight:900;margin-bottom:14px;cursor:pointer">
+Show All Transactions
+</button>
+
+<div class="tablewrap">
+<table id="stkTable">
+<tr>
+<th>ID</th><th>Phone</th><th>Amount</th><th>Status</th><th>Receipt</th><th>Checkout</th><th>Client IP</th><th>Created</th><th>Paid At</th>
+</tr>
+<?php $rowNo=0; foreach($payments as $p): $rowNo++; ?>
+<tr data-row="<?php echo $rowNo; ?>" data-status="<?php echo htmlspecialchars($p["status"]); ?>" data-date="<?php echo substr($p["created_at"],0,10); ?>">
+<td><?php echo (int)$p["id"]; ?></td>
+<td><?php echo htmlspecialchars($p["phone"]); ?></td>
+<td>KES <?php echo number_format((float)$p["amount"]); ?></td>
+<td><span class="badge <?php echo htmlspecialchars($p["status"]); ?>"><?php echo strtoupper($p["status"]); ?></span></td>
+<td><?php echo htmlspecialchars($p["mpesa_receipt"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($p["checkout_request_id"]); ?></td>
+<td><?php echo htmlspecialchars($p["client_ip"] ?? "-"); ?></td>
+<td><?php echo htmlspecialchars($p["created_at"]); ?></td>
+<td><?php echo htmlspecialchars($p["paid_at"] ?? "-"); ?></td>
+</tr>
+<?php endforeach; ?>
+</table>
+</div>
+</div>
+</div>
+
+<script>
+let showAllRows = false;
+
+function toggleRows(){
+ showAllRows = !showAllRows;
+ document.getElementById("toggleBtn").innerText = showAllRows ? "Show 10 Recent Transactions" : "Show All Transactions";
+ filterRows();
+}
+
+function filterRows(){
+ const q=document.getElementById("searchBox").value.toLowerCase();
+ const s=document.getElementById("statusFilter").value;
+ const d=document.getElementById("dateFilter").value;
+
+ document.querySelectorAll("#stkTable tr[data-status]").forEach(row=>{
+   const text=row.innerText.toLowerCase();
+   const okSearch=text.includes(q);
+   const okStatus=!s || row.dataset.status===s;
+   const okDate=!d || row.dataset.date===d;
+   const okLimit = showAllRows || parseInt(row.dataset.row || "0") <= 10;
+   row.style.display=(okSearch && okStatus && okDate && okLimit) ? "" : "none";
+ });
+}
+document.getElementById("searchBox").addEventListener("input",filterRows);
+document.getElementById("statusFilter").addEventListener("change",filterRows);
+document.getElementById("dateFilter").addEventListener("change",filterRows);
+filterRows();
+</script>
+<script>
+</script>
+</body>
+</html>

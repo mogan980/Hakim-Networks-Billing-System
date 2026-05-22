@@ -1,0 +1,173 @@
+<?php
+require_once __DIR__ . "/access_guard.php";
+require_once __DIR__ . "/config/database.php";
+
+if (($_SESSION["tenant_role"] ?? "") === "super_admin") {
+    header("Location: noc_final_clean.php");
+    exit;
+}
+
+$companyId = $_SESSION["tenant_company_id"];
+
+function one($pdo,$sql,$id){
+    $s=$pdo->prepare($sql);
+    $s->execute([$id]);
+    return $s->fetchColumn();
+}
+
+$clients = one($pdo,"SELECT COUNT(*) FROM clients WHERE company_id=?",$companyId);
+$packages = one($pdo,"SELECT COUNT(*) FROM packages WHERE company_id=?",$companyId);
+$vouchers = one($pdo,"SELECT COUNT(*) FROM vouchers WHERE company_id=?",$companyId);
+$revenue = one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE company_id=? AND status='paid'",$companyId);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Tenant Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+<?php include __DIR__ . "/tenant/tenant_layout.php"; ?>
+
+<div class="main">
+<div class="hero">
+<h1>My ISP Live Dashboard</h1>
+<p>Private workspace. Only your company data appears here.</p>
+</div>
+
+<div class="grid">
+<div class="card"><h3>Clients</h3><strong id="clients"><?php echo $clients; ?></strong></div>
+<div class="card"><h3>Packages</h3><strong id="packages"><?php echo $packages; ?></strong></div>
+<div class="card"><h3>Vouchers</h3><strong id="vouchers"><?php echo $vouchers; ?></strong></div>
+<div class="card"><h3>Revenue</h3><strong id="revenue">KES <?php echo number_format($revenue); ?></strong></div>
+</div>
+
+<div class="panel" style="margin-top:24px;">
+<h2>Quick Actions</h2>
+<a class="btn" href="tenant/tenant_packages.php">Manage Packages</a>
+<a class="btn" href="tenant/tenant_vouchers.php">Manage Vouchers</a>
+<a class="btn" href="tenant/tenant_clients.php">View Clients</a>
+<a class="btn" href="router_wizard.php">Connect Router</a>
+</div>
+
+<div class="grid">
+
+<div class="card">
+<h3>Router Status</h3>
+<strong id="router_status">Checking...</strong>
+</div>
+
+<div class="card">
+<h3>CPU Load</h3>
+<strong id="cpu_load">0%</strong>
+</div>
+
+<div class="card">
+<h3>Hotspot Users</h3>
+<strong id="hotspot_users">0</strong>
+</div>
+
+<div class="card">
+<h3>Simple Queues</h3>
+<strong id="queues">0</strong>
+</div>
+
+</div>
+
+<div class="panel" style="margin-top:24px;">
+<h2>Router Health</h2>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;">
+
+<div class="card">
+<h3>Router Identity</h3>
+<strong id="router_name_live">-</strong>
+</div>
+
+<div class="card">
+<h3>Board</h3>
+<strong id="board_live">-</strong>
+</div>
+
+<div class="card">
+<h3>Uptime</h3>
+<strong id="uptime_live">-</strong>
+</div>
+
+<div class="card">
+<h3>Free Memory</h3>
+<strong id="memory_live">-</strong>
+</div>
+
+</div>
+
+<div style="margin-top:18px;color:#94a3b8;">
+Last sync:
+<span id="updated_live">-</span>
+</div>
+
+</div>
+
+
+<script>
+async function refreshTenant(){
+    try{
+        const r = await fetch("tenant/tenant_live.php?t="+Date.now(), {cache:"no-store"});
+        const d = await r.json();
+        document.getElementById("clients").innerText=d.clients;
+        document.getElementById("packages").innerText=d.packages;
+        document.getElementById("vouchers").innerText=d.vouchers;
+        document.getElementById("revenue").innerText="KES "+Number(d.total_revenue).toLocaleString();
+    }catch(e){}
+}
+setInterval(refreshTenant,10000);
+
+async function loadRouterLive(){
+
+    try{
+
+        const r = await fetch("tenant/tenant_router_live.php?t="+Date.now(),{
+            cache:"no-store"
+        });
+
+        const d = await r.json();
+
+        document.getElementById("router_status").innerText =
+            d.status === "online" ? "ONLINE" : "OFFLINE";
+
+        document.getElementById("cpu_load").innerText =
+            (d.cpu_load || 0) + "%";
+
+        document.getElementById("hotspot_users").innerText =
+            d.active_hotspot_users || 0;
+
+        document.getElementById("queues").innerText =
+            d.simple_queues || 0;
+
+        document.getElementById("router_name_live").innerText =
+            d.router_name || "-";
+
+        document.getElementById("board_live").innerText =
+            d.board || "-";
+
+        document.getElementById("uptime_live").innerText =
+            d.uptime || "-";
+
+        document.getElementById("memory_live").innerText =
+            d.free_memory || "-";
+
+        document.getElementById("updated_live").innerText =
+            d.updated_at || "-";
+
+    }catch(e){
+        console.log(e);
+    }
+}
+
+loadRouterLive();
+
+setInterval(loadRouterLive, 10000);
+
+</script>
+</body>
+</html>

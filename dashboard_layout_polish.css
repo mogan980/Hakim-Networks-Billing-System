@@ -1,0 +1,120 @@
+/* Hakim Networks Dashboard Layout Polish - CSS only */
+
+body{
+  overflow-x:hidden !important;
+}
+
+.main,
+.content,
+.dashboard,
+.container{
+  max-width:100% !important;
+}
+
+.section,
+.card,
+.panel,
+.analytics-card,
+.revenue-analytics-pro,
+.revenue-safe-card,
+.hn-revenue-pro,
+.hn-pro-wrap{
+  max-width:100% !important;
+  box-sizing:border-box !important;
+}
+
+.section{
+  border-radius:24px !important;
+  padding:22px !important;
+  margin:18px 0 !important;
+  box-shadow:0 16px 40px rgba(15,23,42,.08) !important;
+}
+
+.card{
+  border-radius:18px !important;
+  box-shadow:0 12px 28px rgba(15,23,42,.07) !important;
+}
+
+.cards,
+.dashboard-cards,
+.grid,
+.stats,
+.summary-cards{
+  display:grid !important;
+  grid-template-columns:repeat(auto-fit,minmax(210px,1fr)) !important;
+  gap:16px !important;
+  align-items:stretch !important;
+}
+
+.revenue-analytics-pro{
+  padding:20px !important;
+  margin:18px 0 !important;
+  border-radius:24px !important;
+}
+
+.ra-grid-main{
+  display:grid !important;
+  grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+  gap:12px !important;
+}
+
+.ra-grid-small{
+  display:grid !important;
+  grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+  gap:12px !important;
+}
+
+.ra-box{
+  min-height:72px !important;
+  padding:14px 16px !important;
+}
+
+.ra-box b{
+  font-size:20px !important;
+  line-height:1.1 !important;
+}
+
+.ra-chart{
+  height:210px !important;
+  margin:20px 10px 8px !important;
+  gap:18px !important;
+}
+
+.ra-bar{
+  max-width:60px !important;
+}
+
+table{
+  width:100% !important;
+}
+
+.table-wrap,
+.table-responsive{
+  overflow-x:auto !important;
+}
+
+@media(max-width:1100px){
+  .ra-grid-main{grid-template-columns:1fr 1fr !important}
+  .ra-grid-small{grid-template-columns:1fr 1fr !important}
+}
+
+@media(max-width:700px){
+  .ra-grid-main,
+  .ra-grid-small,
+  .cards,
+  .dashboard-cards,
+  .grid,
+  .stats,
+  .summary-cards{
+    grid-template-columns:1fr !important;
+  }
+
+  .section{
+    padding:16px !important;
+  }
+
+  .ra-chart{
+    height:170px !important;
+    gap:8px !important;
+  }
+}

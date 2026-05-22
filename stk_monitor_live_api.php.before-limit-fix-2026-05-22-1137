@@ -1,0 +1,34 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+header("Content-Type: application/json");
+
+require_once __DIR__ . "/config/database.php";
+$pdo->exec("SET time_zone = '+03:00'");
+
+function one($pdo,$sql){
+    try{
+        $v=$pdo->query($sql)->fetchColumn();
+        return is_numeric($v) ? (float)$v : 0;
+    }catch(Exception $e){ return 0; }
+}
+
+$rows=$pdo->query("
+    SELECT 
+        id, phone, amount, status, reference, mpesa_receipt,
+        checkout_id, client_ip, created_at, expires_at
+    FROM payments
+    WHERE method IN ('mpesa','stk','M-PESA','cash')
+    ORDER BY id DESC
+    LIMIT 100
+")->fetchAll(PDO::FETCH_ASSOC);
+
+echo json_encode([
+    "success"=>true,
+    "total_revenue"=>one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'"),
+    "today_revenue"=>one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(created_at)=CURDATE()"),
+    "paid"=>one($pdo,"SELECT COUNT(*) FROM payments WHERE status='paid'"),
+    "pending"=>one($pdo,"SELECT COUNT(*) FROM payments WHERE status='pending'"),
+    "failed"=>one($pdo,"SELECT COUNT(*) FROM payments WHERE status IN ('failed','cancelled')"),
+    "rows"=>$rows,
+    "time"=>date("Y-m-d H:i:s")
+]);

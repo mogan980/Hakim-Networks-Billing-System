@@ -1,0 +1,61 @@
+/* Hakim Networks Revenue Card Polish */
+#hnRevenuePro,
+.hn-revenue-pro,
+.section:has(h2),
+.card:has(h2){
+  transition: all .25s ease;
+}
+
+.revenue-safe-card,
+.hn-revenue-pro,
+.hn-pro-wrap{
+  background: #ffffff !important;
+  border-radius: 26px !important;
+  padding: 28px !important;
+  box-shadow: 0 22px 55px rgba(15,23,42,.10) !important;
+  border: 1px solid rgba(226,232,240,.85) !important;
+}
+
+.revenue-safe-toggle{
+  float:right;
+  margin-top:-6px;
+  border:1px solid #dbe4ef;
+  background:#fff;
+  border-radius:16px;
+  padding:10px 14px;
+  font-weight:800;
+  cursor:pointer;
+  box-shadow:0 8px 22px rgba(15,23,42,.08);
+}
+
+.revenue-safe-hidden .money,
+.revenue-safe-hidden .hn-money,
+.revenue-safe-hidden h2,
+.revenue-safe-hidden .amount{
+  filter: blur(8px);
+  user-select:none;
+}
+
+.revenue-safe-grid{
+  display:grid !important;
+  grid-template-columns:repeat(4,1fr) !important;
+  gap:16px !important;
+}
+
+.revenue-safe-mini{
+  display:grid !important;
+  grid-template-columns:repeat(3,1fr) !important;
+  gap:14px !important;
+  margin-top:18px !important;
+}
+
+.revenue-safe-grid > *,
+.revenue-safe-mini > *{
+  border-radius:18px !important;
+  box-shadow:0 12px 28px rgba(15,23,42,.07) !important;
+}
+
+@media(max-width:900px){
+  .revenue-safe-grid{grid-template-columns:1fr 1fr !important}
+  .revenue-safe-mini{grid-template-columns:1fr !important}
+}

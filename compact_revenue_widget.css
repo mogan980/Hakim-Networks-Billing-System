@@ -1,0 +1,115 @@
+/* Compact Revenue Performance Widget */
+
+.revenue-performance-card{
+    background:#fff;
+    border-radius:24px;
+    padding:18px;
+    box-shadow:0 8px 30px rgba(15,23,42,.08);
+    overflow:hidden;
+}
+
+.revenue-performance-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:14px;
+}
+
+.revenue-performance-header h2{
+    margin:0;
+    font-size:18px;
+    font-weight:800;
+    color:#0f172a;
+}
+
+.revenue-performance-header p{
+    margin:4px 0 0;
+    color:#64748b;
+    font-size:13px;
+}
+
+.revenue-mini-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:12px;
+    margin-top:14px;
+}
+
+.revenue-mini-card{
+    border-radius:18px;
+    padding:14px;
+    min-height:95px;
+}
+
+.rev-green{background:#dcfce7}
+.rev-blue{background:#dbeafe}
+.rev-yellow{background:#fef3c7}
+.rev-purple{background:#ede9fe}
+
+.revenue-mini-card h4{
+    margin:0 0 8px;
+    font-size:13px;
+    color:#475569;
+}
+
+.revenue-mini-card .amount{
+    font-size:18px;
+    font-weight:900;
+    color:#0f172a;
+    margin-bottom:6px;
+}
+
+.revenue-mini-card small{
+    color:#64748b;
+    font-size:12px;
+}
+
+.revenue-bottom-stats{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:10px;
+    margin-top:12px;
+}
+
+.revenue-stat{
+    border:1px solid #e2e8f0;
+    border-radius:14px;
+    padding:12px 14px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-size:14px;
+    font-weight:700;
+}
+
+.revenue-stat span{
+    color:#16a34a;
+    font-weight:900;
+}
+
+.money-hidden .amount{
+    filter:blur(8px);
+}
+
+.hide-money-btn{
+    border:none;
+    background:#f1f5f9;
+    border-radius:12px;
+    padding:8px 14px;
+    cursor:pointer;
+    font-weight:700;
+    color:#0f172a;
+}
+
+@media(max-width:1100px){
+    .revenue-mini-grid{
+        grid-template-columns:repeat(2,1fr);
+    }
+}
+
+@media(max-width:700px){
+    .revenue-mini-grid,
+    .revenue-bottom-stats{
+        grid-template-columns:1fr;
+    }
+}

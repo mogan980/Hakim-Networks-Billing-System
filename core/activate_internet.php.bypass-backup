@@ -1,0 +1,111 @@
+<?php
+require_once __DIR__ . "/../vendor/autoload.php";
+
+use RouterOS\Client;
+use RouterOS\Query;
+
+function activateInternet($clientIp, $packageName, $downSpeed, $upSpeed, $hours, $commentTag)
+{
+    $config = require __DIR__ . "/../config/mikrotik.php";
+
+    try {
+        $client = new Client([
+            "host" => $config["host"],
+            "user" => $config["user"],
+            "pass" => $config["pass"],
+            "port" => $config["port"]
+        ]);
+
+        $expires = date("Y-m-d H:i:s", time() + ($hours * 3600));
+        $queueName = "HN-" . str_replace(".", "-", $clientIp);
+        $bindingComment = "$commentTag | $packageName | expires:$expires";
+
+        // Get MAC from hotspot host table
+        $hosts = $client->query(
+            (new Query("/ip/hotspot/host/print"))
+                ->where("address", $clientIp)
+        )->read();
+
+        $mac = $hosts[0]["mac-address"] ?? "";
+
+        // Remove old active sessions for same IP
+        $active = $client->query(
+            (new Query("/ip/hotspot/active/print"))
+                ->where("address", $clientIp)
+        )->read();
+
+        foreach ($active as $a) {
+            if (!empty($a[".id"])) {
+                $client->query(
+                    (new Query("/ip/hotspot/active/remove"))
+                        ->equal(".id", $a[".id"])
+                )->read();
+            }
+        }
+
+        // Remove old bindings by IP or MAC
+        $bindings = $client->query(new Query("/ip/hotspot/ip-binding/print"))->read();
+
+        foreach ($bindings as $b) {
+            $sameIp = isset($b["address"]) && $b["address"] === $clientIp;
+            $sameMac = $mac !== "" && isset($b["mac-address"]) && strtoupper($b["mac-address"]) === strtoupper($mac);
+
+            if (($sameIp || $sameMac) && !empty($b[".id"])) {
+                $client->query(
+                    (new Query("/ip/hotspot/ip-binding/remove"))
+                        ->equal(".id", $b[".id"])
+                )->read();
+            }
+        }
+
+        // Remove old queue
+        $queues = $client->query(
+            (new Query("/queue/simple/print"))
+                ->where("name", $queueName)
+        )->read();
+
+        foreach ($queues as $q) {
+            if (!empty($q[".id"])) {
+                $client->query(
+                    (new Query("/queue/simple/remove"))
+                        ->equal(".id", $q[".id"])
+                )->read();
+            }
+        }
+
+        // Add bypass binding
+        $bindingQuery = (new Query("/ip/hotspot/ip-binding/add"))
+            ->equal("address", $clientIp)
+            ->equal("type", "bypassed")
+            ->equal("comment", $bindingComment);
+
+        if ($mac !== "") {
+            $bindingQuery->equal("mac-address", $mac);
+        }
+
+        $client->query($bindingQuery)->read();
+
+        // Add bandwidth queue
+        $client->query(
+            (new Query("/queue/simple/add"))
+                ->equal("name", $queueName)
+                ->equal("target", $clientIp . "/32")
+                ->equal("max-limit", $upSpeed . "/" . $downSpeed)
+                ->equal("comment", $bindingComment)
+        )->read();
+
+        return [
+            "success" => true,
+            "message" => "Internet activated",
+            "ip" => $clientIp,
+            "mac" => $mac,
+            "expires" => $expires
+        ];
+
+    } catch (Exception $e) {
+        return [
+            "success" => false,
+            "message" => $e->getMessage()
+        ];
+    }
+}

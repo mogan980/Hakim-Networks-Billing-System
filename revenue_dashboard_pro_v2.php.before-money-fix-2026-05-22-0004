@@ -1,0 +1,86 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+require_once __DIR__ . "/config/database.php";
+
+function one($pdo,$sql){
+    $v=$pdo->query($sql)->fetchColumn();
+    return $v===false || $v===null ? 0 : $v;
+}
+function money($n){ return "Ksh ".number_format((float)$n,0); }
+
+$today=(float)one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(created_at)=CURDATE()");
+$week=(float)one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND YEARWEEK(created_at,1)=YEARWEEK(CURDATE(),1)");
+$month=(float)one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())");
+$total=(float)one($pdo,"SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid'");
+$clients=(int)one($pdo,"SELECT COUNT(*) FROM clients");
+$packages=(int)one($pdo,"SELECT COUNT(*) FROM packages");
+$vouchers=(int)one($pdo,"SELECT COUNT(*) FROM smart_vouchers");
+$max=max($today,$week,$month,$total,1);
+?>
+<style>
+.hn-pro-wrap{background:#fff;border-radius:26px;padding:28px;margin:24px 0;box-shadow:0 18px 45px rgba(15,23,42,.08);font-family:Inter,Arial,sans-serif;color:#071327}
+.hn-pro-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.hn-pro-head h2{margin:0;font-size:28px;font-weight:900}
+.hn-pro-head p{margin:6px 0 0;color:#64748b}
+.hn-toggle{border:1px solid #dbe4ef;background:#fff;border-radius:16px;padding:12px 16px;font-weight:800;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.08)}
+.hn-top-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+.hn-card{position:relative;min-height:215px;border-radius:22px;padding:28px;overflow:hidden;box-shadow:0 12px 28px rgba(15,23,42,.08)}
+.hn-card:before{content:"";position:absolute;right:-45px;top:-45px;width:165px;height:165px;background:rgba(255,255,255,.45);border-radius:50%}
+.hn-ico{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#fff;font-size:25px;margin-bottom:28px}
+.hn-card h3{margin:0 0 14px;font-size:17px}.hn-money{font-size:32px;font-weight:950}.hn-card p{color:#526072;font-weight:700}
+.green{background:linear-gradient(135deg,#dcfce7,#bbf7d0)}.blue{background:linear-gradient(135deg,#dbeafe,#bfdbfe)}.yellow{background:linear-gradient(135deg,#fef3c7,#fde68a)}.purple{background:linear-gradient(135deg,#ede9fe,#ddd6fe)}
+.hn-small{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:22px 0}
+.hn-small-card{display:flex;justify-content:space-between;align-items:center;border:1px solid #e2e8f0;border-radius:20px;padding:24px;background:#fff;box-shadow:0 10px 22px rgba(15,23,42,.05)}
+.hn-small-card b{font-size:20px}.hn-small-card span{font-size:25px;font-weight:950;color:#16a34a}
+.hn-analytics{border:1px solid #e2e8f0;border-radius:24px;padding:26px;background:#fff;box-shadow:0 12px 28px rgba(15,23,42,.06)}
+.hn-analytics-head{display:flex;justify-content:space-between;align-items:center}.hn-live{background:#dcfce7;color:#166534;border-radius:999px;padding:8px 15px;font-weight:900}
+.hn-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:18px 0 30px}.hn-summary div{border:1px solid #e2e8f0;border-radius:16px;padding:16px}.hn-summary b{display:block;font-size:21px}
+.hn-chart{height:230px;display:flex;align-items:end;gap:65px;border-left:1px solid #d9e1ea;border-bottom:1px solid #d9e1ea;padding-left:35px;margin:35px}
+.hn-bar-box{flex:1;text-align:center}.hn-bar{max-width:190px;margin:auto;background:linear-gradient(180deg,#60a5fa,#2563eb);border:2px solid #1683ff;border-radius:4px 4px 0 0}.hn-lbl{margin-top:10px;color:#475569}
+.hn-tip{background:#dcfce7;border-radius:14px;padding:14px 18px;color:#334155}
+.hn-hide .hn-money{filter:blur(8px)}
+@media(max-width:1000px){.hn-top-cards{grid-template-columns:1fr 1fr}.hn-small,.hn-summary{grid-template-columns:1fr}.hn-chart{gap:25px;margin:20px}}
+</style>
+
+<section class="hn-pro-wrap" id="hnProRevenue">
+ <div class="hn-pro-head">
+  <div><h2>Welcome back, Admin 👋</h2><p>Here’s what’s happening with your billing system today.</p></div>
+  <button class="hn-toggle" onclick="hnToggleCurrency()">👁️ <span id="hnCurText">Hide Currency</span></button>
+ </div>
+
+ <div class="hn-top-cards">
+  <div class="hn-card green"><div class="hn-ico">💰</div><h3>Today Revenue</h3><div class="hn-money"><?=money($today)?></div><p>Collected today</p></div>
+  <div class="hn-card blue"><div class="hn-ico">🗓️</div><h3>This Week</h3><div class="hn-money"><?=money($week)?></div><p>Current week total</p></div>
+  <div class="hn-card yellow"><div class="hn-ico">📊</div><h3>This Month</h3><div class="hn-money"><?=money($month)?></div><p>Monthly revenue</p></div>
+  <div class="hn-card purple"><div class="hn-ico">📈</div><h3>Total Revenue</h3><div class="hn-money"><?=money($total)?></div><p>All-time collections</p></div>
+ </div>
+
+ <div class="hn-small">
+  <div class="hn-small-card"><b>Total Clients</b><span><?=$clients?></span></div>
+  <div class="hn-small-card"><b>Packages</b><span><?=$packages?></span></div>
+  <div class="hn-small-card"><b>Vouchers</b><span><?=$vouchers?></span></div>
+ </div>
+
+ <div class="hn-analytics">
+  <div class="hn-analytics-head"><div><h2>📈 Revenue Analytics</h2><p>Professional revenue trend and collection overview.</p></div><span class="hn-live">● Live</span></div>
+  <div class="hn-summary">
+   <div><b class="hn-money"><?=money($total)?></b>Total Revenue</div>
+   <div><b class="hn-money"><?=money($month)?></b>This Month</div>
+   <div><b class="hn-money"><?=money($today)?></b>Today</div>
+  </div>
+  <div class="hn-chart">
+   <?php foreach(["Today"=>$today,"Week"=>$week,"Month"=>$month,"Total"=>$total] as $label=>$amount): $h=max(5,($amount/$max)*190); ?>
+    <div class="hn-bar-box"><div class="hn-bar" style="height:<?=$h?>px"></div><div class="hn-lbl"><?=$label?></div></div>
+   <?php endforeach; ?>
+  </div>
+ </div>
+ <div class="hn-tip">💡 Tip: Click the eye icon to show or hide currency values across all revenue cards and charts.</div>
+</section>
+
+<script>
+function hnToggleCurrency(){
+ const box=document.getElementById("hnProRevenue"), txt=document.getElementById("hnCurText");
+ box.classList.toggle("hn-hide");
+ txt.textContent=box.classList.contains("hn-hide")?"Show Currency":"Hide Currency";
+}
+</script>

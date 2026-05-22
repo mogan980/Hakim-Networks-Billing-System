@@ -1,0 +1,290 @@
+<?php
+session_start();
+require_once "config/database.php";
+
+$error = "";
+$success = "";
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+    $mode = $_POST["mode"] ?? "";
+
+    if ($mode === "login") {
+
+        $email = trim($_POST["email"] ?? "");
+        $password = $_POST["password"] ?? "";
+
+        $stmt = $pdo->prepare("
+            SELECT tenant_users.*, companies.status AS company_status
+            FROM tenant_users
+            LEFT JOIN companies ON companies.id = tenant_users.company_id
+            WHERE tenant_users.email=?
+            LIMIT 1
+        ");
+        $stmt->execute([$email]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($user && password_verify($password, $user["password"])) {
+
+            $_SESSION["tenant_user_id"] = $user["id"];
+            $_SESSION["tenant_company_id"] = $user["company_id"];
+            $_SESSION["tenant_role"] = $user["role"];
+
+            if ($user["role"] !== "super_admin" && $user["company_status"] !== "active") {
+                header("Location: subscription_payment.php?company_id=" . $user["company_id"]);
+                exit;
+            }
+
+            header("Location: noc_final_clean.php");
+            exit;
+
+        } else {
+            $error = "Invalid email or password.";
+        }
+    }
+
+    if ($mode === "register") {
+
+        $company = trim($_POST["company_name"] ?? "");
+        $owner = trim($_POST["owner_name"] ?? "");
+        $phone = trim($_POST["phone"] ?? "");
+        $email = trim($_POST["email"] ?? "");
+        $password = $_POST["password"] ?? "";
+
+        if (!$company || !$owner || !$phone || !$email || !$password) {
+            $error = "All registration fields are required.";
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO companies(company_name, owner_name, phone, email, status)
+                    VALUES(?, ?, ?, ?, 'pending')
+                ");
+                $stmt->execute([$company, $owner, $phone, $email]);
+
+                $companyId = $pdo->lastInsertId();
+                $hash = password_hash($password, PASSWORD_DEFAULT);
+
+                $user = $pdo->prepare("
+                    INSERT INTO tenant_users(company_id, full_name, email, phone, password, role, status)
+                    VALUES(?, ?, ?, ?, ?, 'tenant_admin', 'pending')
+                ");
+                $user->execute([$companyId, $owner, $email, $phone, $hash]);
+
+                $sub = $pdo->prepare("
+                    INSERT INTO subscriptions(company_id, amount, status)
+                    VALUES(?, 1000, 'pending')
+                ");
+                $sub->execute([$companyId]);
+
+                $pdo->commit();
+
+                header("Location: subscription_payment.php?company_id=" . urlencode($companyId));
+                exit;
+
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                $error = "Registration failed: " . $e->getMessage();
+            }
+        }
+    }
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Hakim Networks Billing Access</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box}
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    min-height:100vh;
+    color:white;
+    background:
+        radial-gradient(circle at top left,rgba(34,197,94,.25),transparent 35%),
+        radial-gradient(circle at bottom right,rgba(59,130,246,.18),transparent 35%),
+        linear-gradient(135deg,#020617,#052e2b,#071827);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:22px;
+}
+.wrapper{
+    width:100%;
+    max-width:1100px;
+    display:grid;
+    grid-template-columns:1fr 440px;
+    gap:24px;
+}
+.left,.card{
+    background:rgba(15,23,42,.86);
+    border:1px solid rgba(148,163,184,.18);
+    border-radius:28px;
+    padding:34px;
+    box-shadow:0 30px 90px rgba(0,0,0,.45);
+    backdrop-filter:blur(18px);
+}
+.logo{
+    width:70px;
+    height:70px;
+    border-radius:22px;
+    background:linear-gradient(135deg,#22c55e,#86efac);
+    color:#052e16;
+    display:grid;
+    place-items:center;
+    font-size:34px;
+    font-weight:900;
+    margin-bottom:20px;
+}
+h1{font-size:42px;margin:0 0 12px;color:#22c55e}
+h2{margin-top:0;color:#22c55e}
+p{color:#cbd5e1;line-height:1.6}
+.price{
+    font-size:38px;
+    font-weight:900;
+    margin:18px 0;
+}
+.features{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:12px;
+    margin-top:22px;
+}
+.feature{
+    padding:14px;
+    border-radius:16px;
+    background:rgba(2,6,23,.55);
+    border:1px solid rgba(148,163,184,.12);
+}
+.tabs{
+    display:flex;
+    gap:10px;
+    margin-bottom:22px;
+}
+.tab{
+    flex:1;
+    padding:13px;
+    border-radius:14px;
+    border:1px solid rgba(148,163,184,.18);
+    background:#020617;
+    color:white;
+    font-weight:900;
+    cursor:pointer;
+}
+.tab.active{
+    background:#22c55e;
+    color:#052e16;
+}
+.form{display:none}
+.form.active{display:block}
+input{
+    width:100%;
+    padding:14px;
+    border-radius:14px;
+    border:1px solid #334155;
+    background:#020617;
+    color:white;
+    margin:8px 0;
+}
+button.submit{
+    width:100%;
+    padding:15px;
+    border:0;
+    border-radius:15px;
+    background:#22c55e;
+    color:#052e16;
+    font-weight:900;
+    margin-top:12px;
+    cursor:pointer;
+}
+.alert{
+    padding:12px;
+    border-radius:14px;
+    margin-bottom:14px;
+    background:#450a0a;
+    color:#fecaca;
+}
+.small{font-size:13px;color:#94a3b8;margin-top:18px;text-align:center}
+@media(max-width:900px){
+    .wrapper{grid-template-columns:1fr}
+    h1{font-size:32px}
+    .features{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+
+    <div class="left">
+        <div class="logo">H</div>
+        <h1>Hakim Networks Billing ERP</h1>
+        <p>Professional ISP billing system for hotspot providers, MikroTik operators, voucher sellers, and small internet resellers.</p>
+
+        <div class="price">KES 1,000 <span style="font-size:16px;color:#94a3b8;">/ month</span></div>
+
+        <div class="features">
+            <div class="feature">✅ MikroTik Router Wizard</div>
+            <div class="feature">✅ Hotspot Billing</div>
+            <div class="feature">✅ Voucher Management</div>
+            <div class="feature">✅ M-Pesa Payments</div>
+            <div class="feature">✅ Client Dashboard</div>
+            <div class="feature">✅ Auto Expiry</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Access Your Workspace</h2>
+        <p>Sign in or create a new billing account.</p>
+
+        <?php if($error): ?>
+            <div class="alert"><?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('login')">Sign In</button>
+            <button class="tab" onclick="showTab('register')">Create Account</button>
+        </div>
+
+        <form class="form active" id="loginForm" method="POST">
+            <input type="hidden" name="mode" value="login">
+            <input type="email" name="email" placeholder="Email Address" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button class="submit" type="submit">Sign In</button>
+        </form>
+
+        <form class="form" id="registerForm" method="POST">
+            <input type="hidden" name="mode" value="register">
+            <input name="company_name" placeholder="Business / Company Name" required>
+            <input name="owner_name" placeholder="Owner Full Name" required>
+            <input name="phone" placeholder="Phone e.g. 0704467699" required>
+            <input type="email" name="email" placeholder="Email Address" required>
+            <input type="password" name="password" placeholder="Create Password" required>
+            <button class="submit" type="submit">Create Account & Pay KES 1,000</button>
+        </form>
+
+        <div class="small">You are the platform owner. Other users get limited access after payment.</div>
+    </div>
+
+</div>
+
+<script>
+function showTab(tab){
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".form").forEach(f => f.classList.remove("active"));
+
+    if(tab === "login"){
+        document.querySelectorAll(".tab")[0].classList.add("active");
+        document.getElementById("loginForm").classList.add("active");
+    }else{
+        document.querySelectorAll(".tab")[1].classList.add("active");
+        document.getElementById("registerForm").classList.add("active");
+    }
+}
+</script>
+
+</body>
+</html>
