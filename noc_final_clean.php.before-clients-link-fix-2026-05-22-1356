@@ -1346,7 +1346,7 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
 <a href="payments.php">💳 Payments</a>
 <a href="pppoe.php">🌐 PPPoE</a>
 <a href="router_wizard.php">🧙 Router Wizard</a>
-<a href="health_check.php">🩺 Health Check</a>
+<a href="router_health.php">🩺 Health Check</a>
 <a href="reports.php">📈 Reports</a>
 <a href="analytics.php">📊 Analytics</a>
 <a href="users.php">👤 Users</a>
@@ -1687,7 +1687,7 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
             <a href="settings.php">⚙️ Settings</a>
             <a href="settings.php">🏢 Company Logo</a>
             <a href="router_wizard.php">🧙 Router Wizard</a>
-            <a href="health_check.php">🩺 Health Check</a>
+            <a href="router_health.php">🩺 Health Check</a>
             <a href="reports.php">📈 Reports</a>
             <a href="analytics.php">📊 Analytics</a>
             <a href="backups.php">🛡 Backups</a>

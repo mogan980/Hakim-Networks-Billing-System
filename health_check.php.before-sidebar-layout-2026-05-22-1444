@@ -19,13 +19,6 @@ $failCount = $data["fail_count"] ?? 0;
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{margin:0;background:#07131f;color:#e5e7eb;font-family:Arial,sans-serif}
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:230px;background:#020617;padding:24px 16px}
-.sidebar h2{color:#22c55e;margin:0 0 5px}
-.sidebar p{color:#94a3b8;font-size:12px;margin:0 0 25px}
-.sidebar a{display:block;color:white;text-decoration:none;background:#111827;margin:9px 0;padding:13px 15px;border-radius:12px;font-weight:800}
-.sidebar a.active{background:#16a34a}
-.sidebar a:hover{background:#14532d}
-.wrap{margin-left:260px!important;max-width:none!important;padding:40px 28px!important}
 .wrap{max-width:1050px;margin:45px auto;padding:0 18px}
 .panel{background:#0f1b2d;border:1px solid #1e293b;border-radius:28px;padding:30px;box-shadow:0 25px 60px rgba(0,0,0,.25)}
 .header{display:flex;justify-content:space-between;align-items:center;gap:20px}
@@ -45,19 +38,6 @@ h1{margin:0;font-size:34px}
 </style>
 </head>
 <body>
-<div class="sidebar">
-  <h2>M.Hakim</h2>
-  <p>Hakim Networks ISP</p>
-  <a href="noc_final_clean.php">📊 Dashboard</a>
-  <a href="live_noc.php">📡 Live NOC</a>
-  <a href="queue_control_pro.php">⚡ Queue Control</a>
-  <a href="client_expiry_manager.php">⏱ Client Expiry</a>
-  <a class="active" href="health_check.php">💙 Health Check</a>
-  <a href="smart_vouchers.php">💳 Smart Vouchers</a>
-  <a href="stk_live_monitor.php">💰 STK Monitor</a>
-  <a href="pppoe.php">🌐 PPPoE</a>
-  <a href="noc_final_clean.php">← Back</a>
-</div>
 <div class="wrap">
   <div class="panel">
     <div class="header">
