@@ -103,7 +103,25 @@ if($client){
         $identity=$id[0]["name"] ?? "MikroTik";
 
         foreach($client->query(new Query("/ip/hotspot/active/print"))->read() as $a){
-            if(!empty($a["address"])) $onlineIps[$a["address"]]=true;
+            if(!empty($a["address"])) $onlineIps[$a["address"]]="active";
+        }
+
+        foreach($client->query(new Query("/ip/hotspot/host/print"))->read() as $h){
+            if(!empty($h["address"]) && empty($onlineIps[$h["address"]])){
+                $onlineIps[$h["address"]]="host";
+            }
+        }
+
+        foreach($client->query(new Query("/ip/arp/print"))->read() as $a){
+            if(!empty($a["address"]) && (($a["complete"] ?? "true") === "true") && empty($onlineIps[$a["address"]])){
+                $onlineIps[$a["address"]]="arp";
+            }
+        }
+
+        foreach($client->query(new Query("/ip/dhcp-server/lease/print"))->read() as $l){
+            if(!empty($l["address"]) && (($l["status"] ?? "") === "bound") && empty($onlineIps[$l["address"]])){
+                $onlineIps[$l["address"]]="dhcp";
+            }
         }
 
         foreach($client->query(new Query("/ppp/active/print"))->read() as $a){
@@ -173,13 +191,26 @@ $target=$q["target"] ?? "-";
 preg_match('/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/',$target,$m);
 $ip=$m[1] ?? "";
 $online=$ip && isset($onlineIps[$ip]);
+$onlineMode=$online ? $onlineIps[$ip] : "offline";
 $disabled=($q["disabled"] ?? "false")==="true";
 ?>
 <tr>
 <td><b><?=h($q["name"] ?? "-")?></b></td>
 <td><?=h($target)?></td>
 <td><span class="pill <?=$disabled?'off':'on'?>"><?=$disabled?'DISABLED':'ACTIVE'?></span></td>
-<td><span class="pill <?=$online?'on':'off'?>"><?=$online?'ONLINE':'OFFLINE'?></span></td>
+<td>
+<?php if($onlineMode==="active"): ?>
+<span class="pill on">ACTIVE LOGIN</span>
+<?php elseif($onlineMode==="host"): ?>
+<span class="pill on">CONNECTED HOST</span>
+<?php elseif($onlineMode==="arp"): ?>
+<span class="pill on">ARP ONLINE</span>
+<?php elseif($onlineMode==="dhcp"): ?>
+<span class="pill on">DHCP ONLINE</span>
+<?php else: ?>
+<span class="pill off">OFFLINE</span>
+<?php endif; ?>
+</td>
 <td>
 <?php
 $limit = $q["max-limit"] ?? "-";
@@ -227,5 +258,11 @@ if(str_contains($limit,"/")){
 </table>
 </div>
 </div>
-</body>
+
+<script id="HN_QUEUE_AUTO_REFRESH">
+setTimeout(function(){
+    window.location.reload();
+}, 5000);
+</script>
+\n</body>
 </html>

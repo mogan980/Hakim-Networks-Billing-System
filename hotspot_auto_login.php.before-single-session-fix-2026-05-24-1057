@@ -1,0 +1,86 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once __DIR__ . "/config/database.php";
+
+$ip = $_GET["ip"] ?? ($_SERVER["REMOTE_ADDR"] ?? "");
+$ip = trim($ip);
+
+if(!$ip){
+    die("Missing IP");
+}
+
+$username = null;
+$password = null;
+
+/* VALID VOUCHER */
+$v = $pdo->prepare("
+SELECT voucher_code, expires_at
+FROM smart_vouchers
+WHERE used_by=?
+AND status='used'
+AND expires_at > NOW()
+ORDER BY id DESC
+LIMIT 1
+");
+$v->execute([$ip]);
+$voucher = $v->fetch(PDO::FETCH_ASSOC);
+
+if($voucher){
+    $username = $voucher["voucher_code"];
+    $password = $voucher["voucher_code"];
+}
+
+/* VALID STK */
+if(!$username){
+    $s = $pdo->prepare("
+    SELECT id, phone, expires_at
+    FROM payments
+    WHERE client_ip=?
+    AND status='paid'
+    AND expires_at > NOW()
+    ORDER BY id DESC
+    LIMIT 1
+    ");
+    $s->execute([$ip]);
+    $stk = $s->fetch(PDO::FETCH_ASSOC);
+
+    if($stk){
+        $phone = preg_replace('/\D/','',$stk["phone"]);
+        $username = "stk_" . $phone;
+        $password = "stk" . $stk["id"];
+    }
+}
+
+if(!$username){
+    header("Location: index.php");
+    exit;
+}
+
+/* Real MikroTik hotspot login URL */
+$loginUrl = "http://login.hakim/login";
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Connecting...</title>
+</head>
+<body style="background:#07131f;color:white;font-family:Arial;text-align:center;padding-top:80px;">
+
+<h2>Connecting You To Internet...</h2>
+<p>Please wait...</p>
+
+<form id="loginForm" method="post" action="<?php echo $loginUrl; ?>">
+<input type="hidden" name="username" value="<?php echo htmlspecialchars($username); ?>">
+<input type="hidden" name="password" value="<?php echo htmlspecialchars($password); ?>">
+<input type="hidden" name="dst" value="http://neverssl.com">
+<input type="hidden" name="popup" value="true">
+</form>
+
+<script>
+document.getElementById("loginForm").submit();
+</script>
+
+</body>
+</html>

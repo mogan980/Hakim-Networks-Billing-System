@@ -1319,6 +1319,7 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
 <link rel="stylesheet" href="quick_actions_pro.css">
 <link rel="stylesheet" href="compact_revenue_widget.css">
 <link rel="stylesheet" href="sidebar_uiux_groups.css">
+<link rel="stylesheet" href="revenue_analytics_polish.css">
 </head>
 <body>
 
@@ -1331,6 +1332,7 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
 <a href="noc.php">🖥 NOC Center</a>
 <a href="routers.php">🛰 Routers</a>
 <a href="queue_control_pro.php">⚡ Queue Control</a>
+<a href="bandwidth_graphs.php">📈 Bandwidth Graphs</a>
 <a href="modules.php">🧩 Pro Modules</a>
 <a href="smart_vouchers.php">🎟 Smart Vouchers</a>
 
@@ -1345,11 +1347,13 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
 <a href="vouchers.php">🎫 Vouchers</a>
 <a href="payments.php">💳 Payments</a>
 <a href="pppoe.php">🌐 PPPoE</a>
+<a href="pppoe_live_monitor.php">📡 PPPoE Monitor</a>
 <a href="router_wizard.php">🧙 Router Wizard</a>
 <a href="health_check.php">🩺 Health Check</a>
 <a href="reports.php">📈 Reports</a>
 <a href="analytics.php">📊 Analytics</a>
 <a href="users.php">👤 Users</a>
+<a href="backup_manager.php">💾 Backup Manager</a>
 <a href="settings.php">⚙️ Settings</a>
 <a href="logout.php">🚪 Logout</a>
 </div>
@@ -1436,21 +1440,26 @@ box-shadow:0 6px 18px rgba(34,197,94,.2)!important;
 </div>
 
 <div class="grid">
+
 <div class="section revenue-chart-pro">
-    <div class="chart-head">
-        <div>
-            <h2>📈 Revenue Analytics</h2>
-            <p>Professional revenue trend and collection overview.</p>
-        </div>
-        <span class="chart-pill">Live</span>
+  <div class="chart-head">
+    <div>
+      <h2>📈 Revenue Analytics</h2>
+      <p>Live revenue summary from real payments.</p>
     </div>
-    <div class="chart-summary">
-        <div><b id="revChartTotal">Ksh 0</b><span>Total Revenue</span></div>
-        <div><b id="revChartMonth">Ksh 0</b><span>This Month</span></div>
-        <div><b id="revChartToday">Ksh 0</b><span>Today</span></div>
-    </div>
-    <canvas id="revenueChart"></canvas>
+    <span class="chart-pill">Live</span>
+  </div>
+
+  <div class="chart-summary">
+    <div><b id="revChartTotal">Ksh 0</b><span>Total Revenue</span></div>
+    <div><b id="revChartMonth">Ksh 0</b><span>This Month</span></div>
+    <div><b id="revChartToday">Ksh 0</b><span>Today</span></div>
+    <div><b id="revChartWeek">Ksh 0</b><span>This Week</span></div>
+  </div>
+
+  <canvas id="revenueChart" style="height:220px"></canvas>
 </div>
+
 <div class="section voucher-pro">
     <div class="voucher-head">
         <div>
@@ -2191,5 +2200,230 @@ document.addEventListener("DOMContentLoaded",()=>{
 });
 </script>
 
-</body>
+
+
+\n
+
+\n
+
+\n
+
+\n
+<script id="HN_LIVE_USERS_TABLES">
+document.addEventListener("DOMContentLoaded",()=>{
+
+  function fmtBytes(v){
+    v = Number(v || 0);
+    if(v >= 1073741824) return (v/1073741824).toFixed(2)+" GB";
+    if(v >= 1048576) return (v/1048576).toFixed(2)+" MB";
+    if(v >= 1024) return (v/1024).toFixed(2)+" KB";
+    return v+" B";
+  }
+
+  function findSection(title){
+    return [...document.querySelectorAll("section,div")]
+      .find(x => (x.innerText||"").includes(title) && x.querySelector("table"));
+  }
+
+  function setBadge(section,count){
+    if(!section) return;
+    [...section.querySelectorAll("*")].forEach(el=>{
+      const t=(el.textContent||"").trim();
+      if(/^\d+\s+Online$/.test(t)){
+        el.textContent=count+" Online";
+      }
+    });
+  }
+
+  function replaceRows(section, rowsHtml, emptyHtml){
+    const table = section?.querySelector("table");
+    if(!table) return;
+
+    let tbody = table.querySelector("tbody");
+
+    if(!tbody){
+      tbody = document.createElement("tbody");
+      const allRows = [...table.querySelectorAll("tr")];
+      allRows.slice(1).forEach(r=>r.remove());
+      table.appendChild(tbody);
+    }
+
+    tbody.innerHTML = rowsHtml || emptyHtml;
+  }
+
+  async function syncLiveUsers(){
+    try{
+      const r = await fetch("live_users_api.php?_="+Date.now(), {cache:"no-store"});
+      const d = await r.json();
+      if(!d.success) return;
+
+      const bypassSec = findSection("Online Bypassed Users");
+      setBadge(bypassSec, d.bypassed.length);
+      replaceRows(
+        bypassSec,
+        d.bypassed.map(x=>`
+          <tr>
+            <td>${x.ip}</td>
+            <td>${x.mac}</td>
+            <td>${x.activation}</td>
+            <td><span class="pill on">ONLINE</span></td>
+          </tr>
+        `).join(""),
+        `<tr><td colspan="4">No bypassed users online</td></tr>`
+      );
+
+      const hotspotSec = findSection("Online Hotspot Users");
+      setBadge(hotspotSec, d.hotspot.length);
+      replaceRows(
+        hotspotSec,
+        d.hotspot.map(x=>`
+          <tr>
+            <td>${x.user}</td>
+            <td>${x.ip}</td>
+            <td>${x.mac}</td>
+            <td>${x.uptime}</td>
+            <td>${fmtBytes(x.download)}</td>
+            <td>${fmtBytes(x.upload)}</td>
+            <td><span class="pill on">ACTIVE</span></td>
+            <td>-</td>
+          </tr>
+        `).join(""),
+        `<tr><td colspan="8">No live hotspot users connected right now</td></tr>`
+      );
+
+      const pppoeSec = findSection("Online PPPoE Users");
+      setBadge(pppoeSec, d.pppoe.length);
+      replaceRows(
+        pppoeSec,
+        d.pppoe.map(x=>`
+          <tr>
+            <td>${x.user}</td>
+            <td>${x.ip}</td>
+            <td>${x.caller}</td>
+            <td>${x.uptime}</td>
+            <td>${x.service}</td>
+            <td><span class="pill on">ACTIVE</span></td>
+            <td>-</td>
+          </tr>
+        `).join(""),
+        `<tr><td colspan="7">No PPPoE users online right now</td></tr>`
+      );
+
+    }catch(e){}
+  }
+
+  syncLiveUsers();
+  setInterval(syncLiveUsers,3000);
+});
+</script>
+\n
+
+\n
+
+\n
+
+\n
+
+\n
+
+\n
+
+\n
+<script id="HN_FINAL_REVENUE_NO_FLICKER">
+document.addEventListener("DOMContentLoaded",()=>{
+
+  let revenueChart = null;
+
+  function money(v){
+    return "Ksh " + Number(v || 0).toLocaleString();
+  }
+
+  async function updateRevenue(){
+    try{
+      const r = await fetch("dashboard_payments_real_api.php?_="+Date.now(), {cache:"no-store"});
+      const d = await r.json();
+      if(!d.success) return;
+
+      const total = document.getElementById("revChartTotal");
+      const month = document.getElementById("revChartMonth");
+      const today = document.getElementById("revChartToday");
+      const week  = document.getElementById("revChartWeek");
+
+      if(total) total.textContent = money(d.total_revenue);
+      if(month) month.textContent = money(d.month_revenue);
+      if(today) today.textContent = money(d.today_revenue);
+      if(week)  week.textContent  = money(d.week_revenue);
+
+      const canvas = document.getElementById("revenueChart");
+      if(!canvas || !window.Chart) return;
+
+      const values = [
+        Number(d.today_revenue || 0),
+        Number(d.week_revenue || 0),
+        Number(d.month_revenue || 0),
+        Number(d.total_revenue || 0)
+      ];
+
+      const old = Chart.getChart(canvas);
+      if(old) old.destroy();
+
+      revenueChart = new Chart(canvas,{
+        type:"bar",
+        data:{
+          labels:["Today","Week","Month","Total"],
+          datasets:[
+            {
+              label:"Revenue Ksh",
+              data:values,
+              backgroundColor:"rgba(34,197,94,.35)",
+              borderColor:"#22c55e",
+              borderWidth:2,
+              borderRadius:10
+            },
+            {
+              label:"Trend",
+              type:"line",
+              data:values,
+              borderColor:"#2563eb",
+              backgroundColor:"rgba(37,99,235,.08)",
+              tension:.35,
+              pointRadius:5,
+              fill:false
+            }
+          ]
+        },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          animation:false,
+          plugins:{
+            tooltip:{
+              callbacks:{
+                label:function(ctx){
+                  return "Ksh " + Number(ctx.raw || 0).toLocaleString();
+                }
+              }
+            }
+          },
+          scales:{
+            y:{
+              beginAtZero:true,
+              ticks:{
+                callback:function(v){
+                  return "Ksh " + Number(v).toLocaleString();
+                }
+              }
+            }
+          }
+        }
+      });
+
+    }catch(e){}
+  }
+
+  updateRevenue();
+  setInterval(updateRevenue,5000);
+});
+</script>
+\n</body>
 </html>

@@ -1,0 +1,118 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once __DIR__ . "/vendor/autoload.php";
+require_once __DIR__ . "/config/database.php";
+
+use RouterOS\Client;
+use RouterOS\Query;
+
+$pdo->exec("SET time_zone = '+03:00'");
+
+$ip = $_GET["ip"] ?? ($_SERVER["REMOTE_ADDR"] ?? "");
+$ip = trim($ip);
+
+if(!$ip){
+    die("Missing IP");
+}
+
+function mt(){
+    $cfg = require __DIR__ . "/config/mikrotik.php";
+    return new Client([
+        "host"=>$cfg["host"],
+        "user"=>$cfg["user"],
+        "pass"=>$cfg["pass"],
+        "port"=>$cfg["port"],
+        "timeout"=>5
+    ]);
+}
+
+function ensure_hotspot_user($mt,$user,$pass,$comment){
+    $rows=$mt->query((new Query("/ip/hotspot/user/print"))->where("name",$user))->read();
+    if(!empty($rows[0][".id"])){
+        $mt->query((new Query("/ip/hotspot/user/set"))
+            ->equal(".id",$rows[0][".id"])
+            ->equal("password",$pass)
+            ->equal("disabled","no")
+            ->equal("comment",$comment)
+        )->read();
+        return;
+    }
+
+    $mt->query((new Query("/ip/hotspot/user/add"))
+        ->equal("name",$user)
+        ->equal("password",$pass)
+        ->equal("profile","default")
+        ->equal("disabled","no")
+        ->equal("comment",$comment)
+    )->read();
+}
+
+function ensure_queue($mt,$ip,$name,$comment){
+    foreach($mt->query(new Query("/queue/simple/print"))->read() as $q){
+        if(str_contains($q["target"] ?? "",$ip)) return;
+    }
+
+    $mt->query((new Query("/queue/simple/add"))
+        ->equal("name",$name)
+        ->equal("target",$ip."/32")
+        ->equal("max-limit","2M/6M")
+        ->equal("comment",$comment)
+    )->read();
+}
+
+$loginUser = null;
+$loginPass = null;
+
+$voucher = $pdo->prepare("
+    SELECT voucher_code, expires_at
+    FROM smart_vouchers
+    WHERE used_by=?
+    AND status='used'
+    AND expires_at > NOW()
+    ORDER BY id DESC
+    LIMIT 1
+");
+$voucher->execute([$ip]);
+$v = $voucher->fetch(PDO::FETCH_ASSOC);
+
+if($v){
+    $loginUser = $v["voucher_code"];
+    $loginPass = $v["voucher_code"];
+
+    $mt = mt();
+    ensure_hotspot_user($mt,$loginUser,$loginPass,"Voucher active until ".$v["expires_at"]." IP ".$ip);
+    ensure_queue($mt,$ip,"HN-VOUCHER-".$ip,"Voucher expires ".$v["expires_at"]);
+}
+
+if(!$loginUser){
+    $stk = $pdo->prepare("
+        SELECT id, phone, expires_at
+        FROM payments
+        WHERE client_ip=?
+        AND status='paid'
+        AND expires_at > NOW()
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+    $stk->execute([$ip]);
+    $p = $stk->fetch(PDO::FETCH_ASSOC);
+
+    if($p){
+        $phone = preg_replace('/\D/','',$p["phone"]);
+        $loginUser = "stk_".$phone;
+        $loginPass = "stk".$p["id"];
+
+        $mt = mt();
+        ensure_hotspot_user($mt,$loginUser,$loginPass,"STK active until ".$p["expires_at"]." IP ".$ip);
+        ensure_queue($mt,$ip,"HN-STK-".$ip,"STK expires ".$p["expires_at"]);
+    }
+}
+
+if(!$loginUser){
+    header("Location: index.php?error=no_valid_session");
+    exit;
+}
+
+header("Location: http://login.hakim/login?username=".urlencode($loginUser)."&password=".urlencode($loginPass));
+exit;

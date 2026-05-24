@@ -1,0 +1,67 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+$db = glob("backups/database/*.sql");
+$sys = glob("backups/system/*.tar.gz");
+
+rsort($db);
+rsort($sys);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Backup Manager</title>
+<style>
+body{margin:0;background:#07131f;color:white;font-family:Arial}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:230px;background:#020617;padding:24px 16px}
+.sidebar a{display:block;color:white;text-decoration:none;background:#111827;margin:9px 0;padding:13px;border-radius:12px;font-weight:800}
+.sidebar a.active{background:#16a34a}
+.main{margin-left:260px;padding:30px}
+.box{background:#0f1b2d;border-radius:20px;padding:20px;margin-bottom:20px}
+table{width:100%;border-collapse:collapse}
+th{background:#020617;padding:12px;text-align:left}
+td{padding:12px;border-bottom:1px solid #1e293b}
+.btn{padding:8px 12px;background:#16a34a;color:white;text-decoration:none;border-radius:10px;font-weight:900}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+<a href="noc_final_clean.php">📊 Dashboard</a>
+<a href="client_expiry_manager.php">⏱ Client Expiry</a>
+<a href="queue_control_pro.php">⚡ Queue Control</a>
+<a class="active" href="backup_manager.php">💾 Backup Manager</a>
+</div>
+
+<div class="main">
+<h1>💾 Backup Manager</h1>
+
+<div class="box">
+<h2>Database Backups</h2>
+<table>
+<tr><th>File</th><th>Download</th></tr>
+<?php foreach($db as $f): ?>
+<tr>
+<td><?=basename($f)?></td>
+<td><a class="btn" href="<?=$f?>">Download</a></td>
+</tr>
+<?php endforeach; ?>
+</table>
+</div>
+
+<div class="box">
+<h2>System Backups</h2>
+<table>
+<tr><th>File</th><th>Download</th></tr>
+<?php foreach($sys as $f): ?>
+<tr>
+<td><?=basename($f)?></td>
+<td><a class="btn" href="<?=$f?>">Download</a></td>
+</tr>
+<?php endforeach; ?>
+</table>
+</div>
+
+</div>
+</body>
+</html>

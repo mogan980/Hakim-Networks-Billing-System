@@ -207,7 +207,38 @@ if($client){
 $sourceFilter=$_GET["source"] ?? "all";
 $limit=$_GET["limit"] ?? "20";
 $search=trim($_GET["search"] ?? "");
+
+$hotspotActiveRows = [];
+if($client){
+    try{
+        foreach($client->query(new Query("/ip/hotspot/active/print"))->read() as $a){
+            $addr = $a["address"] ?? "";
+            $user = $a["user"] ?? ($a["name"] ?? "");
+            if($addr){
+                $hotspotActiveRows[] = [
+                    "source"=>"hotspot-active",
+                    "id"=>$a[".id"] ?? $addr,
+                    "client"=>$user ?: $addr,
+                    "status"=>"active",
+                    "online"=>true,
+                    "ip"=>$addr,
+                    "used"=>$a["uptime"] ?? "-",
+                    "expires"=>"Live session",
+                    "remaining"=>"Online now"
+                ];
+            }
+        }
+    }catch(Exception $e){}
+}
+
 $items=[];
+
+
+if($sourceFilter==="all"){
+    foreach($hotspotActiveRows as $hr){
+        $items[] = $hr;
+    }
+}
 
 if($sourceFilter==="all" || $sourceFilter==="voucher"){
     foreach($pdo->query("SELECT * FROM smart_vouchers ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC) as $r){
@@ -254,6 +285,49 @@ if($sourceFilter==="all" || $sourceFilter==="pppoe"){
     }
 }
 
+
+
+// FORCE SHOW LIVE QUEUE CLIENTS FROM MIKROTIK
+if($client){
+    try{
+        $liveQueues = $client->query(new Query("/queue/simple/print"))->read();
+
+        foreach($liveQueues as $q){
+            $target = $q["target"] ?? "";
+
+            if(preg_match('/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/', $target, $m)){
+                $ip = $m[1];
+
+                $exists = false;
+                foreach($items as $it){
+                    if(($it["ip"] ?? "") === $ip){
+                        $exists = true;
+                        break;
+                    }
+                }
+
+                if(!$exists){
+                    $mode = $onlineIps[$ip] ?? "offline";
+
+                    $items[] = [
+                        "source"=>"queue-live",
+                        "id"=>$ip,
+                        "client"=>$q["name"] ?? $ip,
+                        "status"=>"active",
+                        "online"=>isset($onlineIps[$ip]),
+                        "onlineMode"=>$mode,
+                        "ip"=>$ip,
+                        "used"=>"Live MikroTik Queue",
+                        "expires"=>"Live queue",
+                        "remaining"=>"Auto reconnected"
+                    ];
+                }
+            }
+        }
+    }catch(Exception $e){}
+}
+
+
 if($search){
     $items=array_filter($items,function($x)use($search){
         return stripos($x["client"],$search)!==false || stripos($x["ip"],$search)!==false || stripos($x["source"],$search)!==false;
@@ -261,8 +335,48 @@ if($search){
 }
 
 usort($items,function($a,$b){
-    if($a["status"]==="expired" && $a["online"]) return -1;
-    if($b["status"]==="expired" && $b["online"]) return 1;
+    return strtotime($b["used"] ?? "1970-01-01") <=> strtotime($a["used"] ?? "1970-01-01");
+});
+
+// Enforce one displayed active session per IP: newest wins
+$unique = [];
+foreach($items as $x){
+    $key = !empty($x["ip"]) && $x["ip"] !== "-" ? $x["ip"] : $x["source"]."-".$x["id"];
+
+    if(!isset($unique[$key])){
+        $unique[$key] = $x;
+        continue;
+    }
+
+    // Prefer live MikroTik queue/active rows over expired/offline database rows
+    $old = $unique[$key];
+
+    if(($x["source"] ?? "") === "queue-live"){
+        $unique[$key] = $x;
+        continue;
+    }
+
+    if(($old["status"] ?? "") === "expired" && ($x["status"] ?? "") !== "expired"){
+        $unique[$key] = $x;
+        continue;
+    }
+
+    if(!($old["online"] ?? false) && ($x["online"] ?? false)){
+        $unique[$key] = $x;
+        continue;
+    }
+}
+$items = array_values($unique);
+
+usort($items,function($a,$b){
+    // Online/live clients first
+    if(($a["online"] ?? false) && !($b["online"] ?? false)) return -1;
+    if(!($a["online"] ?? false) && ($b["online"] ?? false)) return 1;
+
+    // Expired online clients next for cleanup
+    if($a["status"]==="expired" && ($a["online"] ?? false)) return -1;
+    if($b["status"]==="expired" && ($b["online"] ?? false)) return 1;
+
     return strcmp($b["used"],$a["used"]);
 });
 
@@ -347,7 +461,23 @@ input[type=number]{width:55px}.msg{background:#052e16;color:#86efac;padding:12px
 <td><?=strtoupper(h($x["source"]))?></td>
 <td><b style="color:#5eead4"><?=h($x["client"])?></b></td>
 <td><span class="pill <?=$x["status"]==="expired"?"ex":"ok"?>"><?=strtoupper(h($x["status"]))?></span></td>
-<td><span class="pill <?=$x["online"]?"on":"off"?>"><?=$x["online"]?"ONLINE":"OFFLINE"?></span></td>
+<td>
+<?php
+$mode = $x["onlineMode"] ?? "offline";
+
+if($mode === "active"){
+    echo '<span class="pill on">ACTIVE LOGIN</span>';
+}elseif($mode === "host"){
+    echo '<span class="pill on">CONNECTED HOST</span>';
+}elseif($mode === "arp"){
+    echo '<span class="pill on">ONLINE</span>';
+}elseif(!empty($x["online"])){
+    echo '<span class="pill on">ONLINE</span>';
+}else{
+    echo '<span class="pill off">OFFLINE</span>';
+}
+?>
+</td>
 <td><?=h($x["ip"] ?: "-")?></td>
 <td><?=h($x["used"])?></td>
 <td><?=h($x["expires"])?></td>

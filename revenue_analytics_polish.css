@@ -1,0 +1,68 @@
+/* Revenue Analytics Professional UI Polish */
+#revenueChart{
+  max-height:260px !important;
+}
+
+.analytics-card,
+.revenue-analytics,
+.card:has(#revenueChart){
+  border-radius:26px !important;
+  background:linear-gradient(145deg,#ffffff,#f8fbff) !important;
+  border:1px solid #e2e8f0 !important;
+  box-shadow:0 18px 45px rgba(15,23,42,.10) !important;
+  padding:22px !important;
+}
+
+.analytics-card h2,
+.revenue-analytics h2,
+.card:has(#revenueChart) h2{
+  font-size:24px !important;
+  font-weight:950 !important;
+  color:#0f172a !important;
+  letter-spacing:-.3px !important;
+}
+
+.analytics-card p,
+.revenue-analytics p,
+.card:has(#revenueChart) p{
+  color:#64748b !important;
+  font-size:14px !important;
+}
+
+.analytics-card .live,
+.revenue-analytics .live,
+.card:has(#revenueChart) .live{
+  background:#dcfce7 !important;
+  color:#166534 !important;
+  padding:8px 14px !important;
+  border-radius:999px !important;
+  font-weight:900 !important;
+}
+
+.analytics-card .stat,
+.analytics-card .mini-card,
+.revenue-analytics .stat,
+.revenue-analytics .mini-card,
+.card:has(#revenueChart) .stat,
+.card:has(#revenueChart) .mini-card{
+  border-radius:18px !important;
+  border:1px solid #e2e8f0 !important;
+  background:#ffffff !important;
+  box-shadow:0 10px 24px rgba(15,23,42,.05) !important;
+  transition:.2s ease !important;
+}
+
+.analytics-card .stat:hover,
+.analytics-card .mini-card:hover,
+.revenue-analytics .stat:hover,
+.revenue-analytics .mini-card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 14px 30px rgba(15,23,42,.08) !important;
+}
+
+.chartjs-render-monitor,
+canvas#revenueChart{
+  background:#ffffff !important;
+  border-radius:20px !important;
+  padding:10px !important;
+}

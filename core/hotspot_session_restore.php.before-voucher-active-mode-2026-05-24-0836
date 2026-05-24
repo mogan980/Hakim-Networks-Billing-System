@@ -1,0 +1,151 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+
+require_once __DIR__ . "/../vendor/autoload.php";
+require_once __DIR__ . "/../config/database.php";
+
+use RouterOS\Client;
+use RouterOS\Query;
+
+$pdo->exec("SET time_zone = '+03:00'");
+$log="/tmp/hakim_hotspot_session_restore.log";
+
+function logx($m){
+    global $log;
+    file_put_contents($log,"[".date("Y-m-d H:i:s")."] ".$m.PHP_EOL,FILE_APPEND);
+}
+
+function mt(){
+    $cfg=require __DIR__."/../config/mikrotik.php";
+    return new Client([
+        "host"=>$cfg["host"],
+        "user"=>$cfg["user"],
+        "pass"=>$cfg["pass"],
+        "port"=>$cfg["port"],
+        "timeout"=>5
+    ]);
+}
+
+function hotspot_user_exists($mt,$username){
+    $rows=$mt->query((new Query("/ip/hotspot/user/print"))->where("name",$username))->read();
+    return $rows[0][".id"] ?? null;
+}
+
+function upsert_hotspot_user($mt,$username,$password,$comment){
+    $id=hotspot_user_exists($mt,$username);
+
+    if($id){
+        $mt->query(
+            (new Query("/ip/hotspot/user/set"))
+            ->equal(".id",$id)
+            ->equal("password",$password)
+            ->equal("comment",$comment)
+            ->equal("disabled","no")
+        )->read();
+        return "updated";
+    }
+
+    $mt->query(
+        (new Query("/ip/hotspot/user/add"))
+        ->equal("name",$username)
+        ->equal("password",$password)
+        ->equal("profile","default")
+        ->equal("comment",$comment)
+        ->equal("disabled","no")
+    )->read();
+
+    return "created";
+}
+
+function queue_exists($mt,$ip){
+    foreach($mt->query(new Query("/queue/simple/print"))->read() as $q){
+        if(str_contains($q["target"] ?? "",$ip)) return true;
+    }
+    return false;
+}
+
+function restore_queue($mt,$name,$ip,$down="6M",$up="2M",$comment=""){
+    if(queue_exists($mt,$ip)) return false;
+
+    $mt->query(
+        (new Query("/queue/simple/add"))
+        ->equal("name",$name)
+        ->equal("target",$ip."/32")
+        ->equal("max-limit",$up."/".$down)
+        ->equal("comment",$comment)
+    )->read();
+
+    return true;
+}
+
+try{
+    $mt=mt();
+    $restored=0;
+
+    // STK paid valid clients
+    $stk=$pdo->query("
+        SELECT id, phone, client_ip, expires_at
+        FROM payments
+        WHERE status='paid'
+        AND client_ip IS NOT NULL
+        AND client_ip!=''
+        AND expires_at IS NOT NULL
+        AND expires_at > NOW()
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach($stk as $r){
+        $ip=trim($r["client_ip"]);
+        $username="stk_".preg_replace('/[^0-9]/','',$r["phone"]);
+        $password="stk".$r["id"];
+
+        upsert_hotspot_user(
+            $mt,
+            $username,
+            $password,
+            "STK valid until ".$r["expires_at"]." IP ".$ip
+        );
+
+        if(restore_queue($mt,"HN-STK-".$ip,$ip,"6M","2M","STK expires ".$r["expires_at"])){
+            $restored++;
+        }
+
+        logx("STK hotspot user restored: {$username} {$ip}");
+    }
+
+    // Voucher valid clients
+    $vouchers=$pdo->query("
+        SELECT id, voucher_code, used_by, expires_at
+        FROM smart_vouchers
+        WHERE status='used'
+        AND used_by IS NOT NULL
+        AND used_by!=''
+        AND expires_at IS NOT NULL
+        AND expires_at > NOW()
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach($vouchers as $r){
+        $ip=trim($r["used_by"]);
+        $username=$r["voucher_code"];
+        $password=$r["voucher_code"];
+
+        upsert_hotspot_user(
+            $mt,
+            $username,
+            $password,
+            "Voucher valid until ".$r["expires_at"]." IP ".$ip
+        );
+
+        if(restore_queue($mt,"HN-VOUCHER-".$ip,$ip,"6M","2M","Voucher expires ".$r["expires_at"])){
+            $restored++;
+        }
+
+        logx("Voucher hotspot user restored: {$username} {$ip}");
+    }
+
+    logx("Hotspot session restore complete. Queues restored: ".$restored);
+    echo "Hotspot session restore complete. Queues restored: ".$restored.PHP_EOL;
+
+}catch(Exception $e){
+    logx("FAILED: ".$e->getMessage());
+    echo "FAILED: ".$e->getMessage().PHP_EOL;
+}

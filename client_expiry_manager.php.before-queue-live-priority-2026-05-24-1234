@@ -1,0 +1,456 @@
+<?php
+date_default_timezone_set("Africa/Nairobi");
+require_once __DIR__ . "/vendor/autoload.php";
+require_once __DIR__ . "/config/database.php";
+
+use RouterOS\Client;
+use RouterOS\Query;
+
+$pdo->exec("SET time_zone = '+03:00'");
+
+function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES, "UTF-8"); }
+function has_col($pdo,$table,$col){
+    try{
+        $s=$pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $s->execute([$col]);
+        return (bool)$s->fetch();
+    }catch(Exception $e){ return false; }
+}
+function ensure_tables($pdo){
+    try{
+        if(!has_col($pdo,"payments","expires_at")){
+            $pdo->exec("ALTER TABLE payments ADD COLUMN expires_at DATETIME NULL AFTER created_at");
+        }
+    }catch(Exception $e){}
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS pppoe_client_expiry (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(100) UNIQUE,
+            expires_at DATETIME NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ");
+}
+ensure_tables($pdo);
+
+function mt(){
+    $cfg=require __DIR__ . "/config/mikrotik.php";
+    foreach(array_unique([$cfg["host"] ?? "192.168.88.1","192.168.88.1","10.10.10.1"]) as $host){
+        try{
+            return new Client([
+                "host"=>$host,
+                "user"=>$cfg["user"],
+                "pass"=>$cfg["pass"],
+                "port"=>$cfg["port"],
+                "timeout"=>5
+            ]);
+        }catch(Exception $e){}
+    }
+    return null;
+}
+
+function disconnect_ip($client,$ip){
+    if(!$client || !$ip) return false;
+    $done=false;
+
+    try{
+        foreach($client->query((new Query("/ip/hotspot/active/print"))->where("address",$ip))->read() as $a){
+            if(isset($a[".id"])){
+                $client->query((new Query("/ip/hotspot/active/remove"))->equal(".id",$a[".id"]))->read();
+                $done=true;
+            }
+        }
+    }catch(Exception $e){}
+
+    try{
+        foreach($client->query(new Query("/queue/simple/print"))->read() as $q){
+            if(isset($q["target"],$q[".id"]) && str_contains($q["target"],$ip)){
+                $client->query((new Query("/queue/simple/remove"))->equal(".id",$q[".id"]))->read();
+                $done=true;
+            }
+        }
+    }catch(Exception $e){}
+
+    return $done;
+}
+
+function disconnect_pppoe($client,$username){
+    if(!$client || !$username) return false;
+    $done=false;
+
+    try{
+        foreach($client->query((new Query("/ppp/active/print"))->where("name",$username))->read() as $a){
+            if(isset($a[".id"])){
+                $client->query((new Query("/ppp/active/remove"))->equal(".id",$a[".id"]))->read();
+                $done=true;
+            }
+        }
+    }catch(Exception $e){}
+
+    return $done;
+}
+
+$client=mt();
+$msg="";
+
+if($_SERVER["REQUEST_METHOD"]==="POST"){
+    $source=$_POST["source"] ?? "";
+    $id=$_POST["id"] ?? "";
+    $action=$_POST["action"] ?? "";
+    $hours=max(1,(int)($_POST["hours"] ?? 1));
+
+    if($source==="voucher"){
+        $s=$pdo->prepare("SELECT * FROM smart_vouchers WHERE id=?");
+        $s->execute([$id]);
+        $r=$s->fetch(PDO::FETCH_ASSOC);
+        if($r){
+            $ip=trim($r["used_by"] ?? "");
+            if($action==="disconnect"){ disconnect_ip($client,$ip); $msg="Voucher client disconnected."; }
+            if($action==="clean"){ disconnect_ip($client,$ip); $pdo->prepare("UPDATE smart_vouchers SET status='expired' WHERE id=?")->execute([$id]); $msg="Voucher cleaned."; }
+            if($action==="extend"){
+                $pdo->prepare("UPDATE smart_vouchers SET expires_at=DATE_ADD(GREATEST(COALESCE(expires_at,NOW()),NOW()), INTERVAL ? HOUR), status='used' WHERE id=?")->execute([$hours,$id]);
+                $msg="Voucher extended by {$hours} hour(s).";
+            }
+            if($action==="delete"){ disconnect_ip($client,$ip); $pdo->prepare("DELETE FROM smart_vouchers WHERE id=?")->execute([$id]); $msg="Voucher deleted."; }
+        }
+    }
+
+    if($source==="stk"){
+        $s=$pdo->prepare("SELECT * FROM payments WHERE id=?");
+        $s->execute([$id]);
+        $r=$s->fetch(PDO::FETCH_ASSOC);
+        if($r){
+            $ip=trim($r["client_ip"] ?? "");
+            if($action==="disconnect"){ disconnect_ip($client,$ip); $msg="STK client disconnected."; }
+            if($action==="clean"){ disconnect_ip($client,$ip); $pdo->prepare("UPDATE payments SET status='expired' WHERE id=?")->execute([$id]); $msg="STK client cleaned."; }
+            if($action==="extend"){
+                $pdo->prepare("UPDATE payments SET expires_at=DATE_ADD(GREATEST(COALESCE(expires_at,NOW()),NOW()), INTERVAL ? HOUR), status='paid' WHERE id=?")->execute([$hours,$id]);
+                $msg="STK client extended by {$hours} hour(s).";
+            }
+            if($action==="delete"){ disconnect_ip($client,$ip); $pdo->prepare("DELETE FROM payments WHERE id=?")->execute([$id]); $msg="STK record deleted."; }
+        }
+    }
+
+    if($source==="pppoe"){
+        $username=$id;
+        if($action==="disconnect"){ disconnect_pppoe($client,$username); $msg="PPPoE client disconnected."; }
+        if($action==="clean"){ disconnect_pppoe($client,$username); $msg="PPPoE expired client cleaned."; }
+        if($action==="extend"){
+            $pdo->prepare("
+                INSERT INTO pppoe_client_expiry(username,expires_at)
+                VALUES(?,DATE_ADD(NOW(), INTERVAL ? HOUR))
+                ON DUPLICATE KEY UPDATE expires_at=DATE_ADD(GREATEST(COALESCE(expires_at,NOW()),NOW()), INTERVAL ? HOUR)
+            ")->execute([$username,$hours,$hours]);
+            $msg="PPPoE client extended by {$hours} hour(s).";
+        }
+        if($action==="delete"){
+            disconnect_pppoe($client,$username);
+            if($client){
+                try{
+                    foreach($client->query((new Query("/ppp/secret/print"))->where("name",$username))->read() as $sec){
+                        if(isset($sec[".id"])){
+                            $client->query((new Query("/ppp/secret/remove"))->equal(".id",$sec[".id"]))->read();
+                        }
+                    }
+                }catch(Exception $e){}
+            }
+            $pdo->prepare("DELETE FROM pppoe_client_expiry WHERE username=?")->execute([$username]);
+            $msg="PPPoE client deleted.";
+        }
+    }
+}
+
+if(isset($_GET["auto_clean"])){
+    $cleaned=0;
+
+    foreach($pdo->query("SELECT * FROM smart_vouchers WHERE status='used' AND expires_at IS NOT NULL AND expires_at<=NOW()")->fetchAll(PDO::FETCH_ASSOC) as $r){
+        if(disconnect_ip($client,trim($r["used_by"] ?? ""))) $cleaned++;
+        $pdo->prepare("UPDATE smart_vouchers SET status='expired' WHERE id=?")->execute([$r["id"]]);
+    }
+
+    foreach($pdo->query("SELECT * FROM payments WHERE status='paid' AND expires_at IS NOT NULL AND expires_at<=NOW()")->fetchAll(PDO::FETCH_ASSOC) as $r){
+        if(disconnect_ip($client,trim($r["client_ip"] ?? ""))) $cleaned++;
+        $pdo->prepare("UPDATE payments SET status='expired' WHERE id=?")->execute([$r["id"]]);
+    }
+
+    foreach($pdo->query("SELECT * FROM pppoe_client_expiry WHERE expires_at IS NOT NULL AND expires_at<=NOW()")->fetchAll(PDO::FETCH_ASSOC) as $r){
+        if(disconnect_pppoe($client,$r["username"])) $cleaned++;
+    }
+
+    $msg="Auto clean complete. Removed {$cleaned} expired online client(s).";
+}
+
+$onlineIps=[];
+$pppOnline=[];
+$pppSecrets=[];
+
+if($client){
+    try{
+        foreach($client->query(new Query("/ip/hotspot/active/print"))->read() as $a){
+            if(!empty($a["address"])) $onlineIps[$a["address"]]=true;
+        }
+    }catch(Exception $e){}
+
+    try{
+        foreach($client->query(new Query("/ppp/active/print"))->read() as $a){
+            if(!empty($a["name"])) $pppOnline[$a["name"]]=true;
+        }
+    }catch(Exception $e){}
+
+    try{
+        $pppSecrets=$client->query(new Query("/ppp/secret/print"))->read();
+    }catch(Exception $e){}
+}
+
+$sourceFilter=$_GET["source"] ?? "all";
+$limit=$_GET["limit"] ?? "20";
+$search=trim($_GET["search"] ?? "");
+
+$hotspotActiveRows = [];
+if($client){
+    try{
+        foreach($client->query(new Query("/ip/hotspot/active/print"))->read() as $a){
+            $addr = $a["address"] ?? "";
+            $user = $a["user"] ?? ($a["name"] ?? "");
+            if($addr){
+                $hotspotActiveRows[] = [
+                    "source"=>"hotspot-active",
+                    "id"=>$a[".id"] ?? $addr,
+                    "client"=>$user ?: $addr,
+                    "status"=>"active",
+                    "online"=>true,
+                    "ip"=>$addr,
+                    "used"=>$a["uptime"] ?? "-",
+                    "expires"=>"Live session",
+                    "remaining"=>"Online now"
+                ];
+            }
+        }
+    }catch(Exception $e){}
+}
+
+$items=[];
+
+
+if($sourceFilter==="all"){
+    foreach($hotspotActiveRows as $hr){
+        $items[] = $hr;
+    }
+}
+
+if($sourceFilter==="all" || $sourceFilter==="voucher"){
+    foreach($pdo->query("SELECT * FROM smart_vouchers ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC) as $r){
+        $ip=trim($r["used_by"] ?? "");
+        $expires=$r["expires_at"] ?? null;
+        $expired=$expires && strtotime($expires)<=time();
+        $items[]=[
+            "source"=>"voucher","id"=>$r["id"],"client"=>$r["voucher_code"] ?? "-",
+            "status"=>$expired?"expired":($r["status"] ?? "-"),"online"=>$ip && isset($onlineIps[$ip]),
+            "ip"=>$ip,"used"=>$r["used_at"] ?? "-","expires"=>$expires ?: "-",
+            "remaining"=>$expires ? (strtotime($expires)>time()?floor((strtotime($expires)-time())/3600)."h ".floor(((strtotime($expires)-time())%3600)/60)."m":"Expired") : "-"
+        ];
+    }
+}
+
+if($sourceFilter==="all" || $sourceFilter==="stk"){
+    foreach($pdo->query("SELECT * FROM payments WHERE client_ip IS NOT NULL AND client_ip!='' AND status IN ('paid','expired') ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC) as $r){
+        $ip=trim($r["client_ip"] ?? "");
+        $expires=$r["expires_at"] ?? null;
+        $expired=$expires && strtotime($expires)<=time();
+        $items[]=[
+            "source"=>"stk","id"=>$r["id"],"client"=>$r["phone"] ?? ("PAY-".$r["id"]),
+            "status"=>$expired?"expired":($r["status"] ?? "-"),"online"=>$ip && isset($onlineIps[$ip]),
+            "ip"=>$ip,"used"=>$r["created_at"] ?? "-","expires"=>$expires ?: "No expiry",
+            "remaining"=>$expires ? (strtotime($expires)>time()?floor((strtotime($expires)-time())/3600)."h ".floor(((strtotime($expires)-time())%3600)/60)."m":"Expired") : "No expiry"
+        ];
+    }
+}
+
+if($sourceFilter==="all" || $sourceFilter==="pppoe"){
+    foreach($pppSecrets as $sec){
+        $name=$sec["name"] ?? "";
+        if(!$name) continue;
+        $e=$pdo->prepare("SELECT expires_at FROM pppoe_client_expiry WHERE username=?");
+        $e->execute([$name]);
+        $expires=$e->fetchColumn();
+        $expired=$expires && strtotime($expires)<=time();
+        $items[]=[
+            "source"=>"pppoe","id"=>$name,"client"=>$name,
+            "status"=>$expired?"expired":"active","online"=>isset($pppOnline[$name]),
+            "ip"=>"-","used"=>"-","expires"=>$expires ?: "No expiry",
+            "remaining"=>$expires ? (strtotime($expires)>time()?floor((strtotime($expires)-time())/3600)."h ".floor(((strtotime($expires)-time())%3600)/60)."m":"Expired") : "No expiry"
+        ];
+    }
+}
+
+
+
+// FORCE SHOW LIVE QUEUE CLIENTS FROM MIKROTIK
+if($client){
+    try{
+        $liveQueues = $client->query(new Query("/queue/simple/print"))->read();
+
+        foreach($liveQueues as $q){
+            $target = $q["target"] ?? "";
+
+            if(preg_match('/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/', $target, $m)){
+                $ip = $m[1];
+
+                $exists = false;
+                foreach($items as $it){
+                    if(($it["ip"] ?? "") === $ip){
+                        $exists = true;
+                        break;
+                    }
+                }
+
+                if(!$exists){
+                    $mode = $onlineIps[$ip] ?? "offline";
+
+                    $items[] = [
+                        "source"=>"queue-live",
+                        "id"=>$ip,
+                        "client"=>$q["name"] ?? $ip,
+                        "status"=>"active",
+                        "online"=>isset($onlineIps[$ip]),
+                        "onlineMode"=>$mode,
+                        "ip"=>$ip,
+                        "used"=>"Live MikroTik Queue",
+                        "expires"=>"Live queue",
+                        "remaining"=>"Auto reconnected"
+                    ];
+                }
+            }
+        }
+    }catch(Exception $e){}
+}
+
+
+if($search){
+    $items=array_filter($items,function($x)use($search){
+        return stripos($x["client"],$search)!==false || stripos($x["ip"],$search)!==false || stripos($x["source"],$search)!==false;
+    });
+}
+
+usort($items,function($a,$b){
+    return strtotime($b["used"] ?? "1970-01-01") <=> strtotime($a["used"] ?? "1970-01-01");
+});
+
+// Enforce one displayed active session per IP: newest wins
+$unique = [];
+foreach($items as $x){
+    $key = !empty($x["ip"]) && $x["ip"] !== "-" ? $x["ip"] : $x["source"]."-".$x["id"];
+    if(!isset($unique[$key])){
+        $unique[$key] = $x;
+    }
+}
+$items = array_values($unique);
+
+usort($items,function($a,$b){
+    if($a["status"]==="expired" && $a["online"]) return -1;
+    if($b["status"]==="expired" && $b["online"]) return 1;
+    return strcmp($b["used"],$a["used"]);
+});
+
+if($limit!=="all") $items=array_slice($items,0,(int)$limit);
+
+$expiredOnline=count(array_filter($items,fn($x)=>$x["status"]==="expired" && $x["online"]));
+$active=count(array_filter($items,fn($x)=>$x["status"]!=="expired"));
+$total=count($items);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Client Expiry Manager</title>
+<style>
+body{margin:0;background:#07131f;color:#e5e7eb;font-family:Arial}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:230px;background:#020617;padding:24px 16px}
+.sidebar h2{color:#22c55e}.sidebar a{display:block;color:white;text-decoration:none;background:#111827;margin:10px 0;padding:13px;border-radius:12px;font-weight:800}.sidebar a.active{background:#16a34a}
+.main{margin-left:260px;padding:28px}.top{display:flex;justify-content:space-between}
+.badge{background:#064e3b;color:#86efac;border-radius:999px;padding:10px 16px;font-weight:900}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{background:#0f1b2d;border:1px solid #1e293b;border-radius:20px;padding:22px}.card b{font-size:38px}
+.red{color:#ef4444}.green{color:#22c55e}.blue{color:#38bdf8}
+.btn{border:0;border-radius:10px;padding:9px 12px;font-weight:900;cursor:pointer;text-decoration:none;display:inline-block}.g{background:#22c55e;color:#052e16}.b{background:#2563eb;color:white}.o{background:#f97316;color:white}.r{background:#ef4444;color:white}.gray{background:#64748b;color:white}
+.filters{display:flex;gap:10px;margin:20px 0;flex-wrap:wrap}.filters input,.filters select{background:#020617;color:white;border:1px solid #334155;border-radius:12px;padding:11px}
+.box{background:#0f1b2d;border:1px solid #1e293b;border-radius:20px;padding:18px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px}th{background:#020617;padding:12px;text-align:left}td{padding:12px;border-bottom:1px solid #1e293b}
+.pill{border-radius:999px;padding:6px 10px;font-weight:900;font-size:11px}.on,.ok{background:#dcfce7;color:#166534}.off,.ex{background:#fee2e2;color:#991b1b}
+input[type=number]{width:55px}.msg{background:#052e16;color:#86efac;padding:12px;border-radius:12px;margin:15px 0}
+</style>
+</head>
+<body>
+<div class="sidebar">
+<h2>M.Hakim</h2>
+<a href="noc_final_clean.php">📊 Dashboard</a>
+<a href="smart_vouchers.php">💳 Smart Vouchers</a>
+<a class="active" href="client_expiry_manager.php">⏱ Client Expiry</a>
+<a href="stk_live_monitor.php">💰 STK Monitor</a>
+<a href="pppoe.php">🌐 PPPoE</a>
+<a href="payments.php">💵 Payments</a>
+</div>
+
+<div class="main">
+<div class="top">
+<div><h1>Client Expiry Manager</h1><p>Time now: <?=date("Y-m-d H:i:s")?> Africa/Nairobi</p></div>
+<span class="badge">● <?=$client?"MikroTik Online":"MikroTik Offline"?></span>
+</div>
+
+<?php if($msg): ?><div class="msg"><?=h($msg)?></div><?php endif; ?>
+
+<div class="cards">
+<div class="card"><span>Expired Still Online</span><b class="red"><?=$expiredOnline?></b></div>
+<div class="card"><span>Active Clients</span><b class="green"><?=$active?></b></div>
+<div class="card"><span>Displayed Clients</span><b class="blue"><?=$total?></b></div>
+</div>
+
+<div style="margin:20px 0">
+<a class="btn g" href="?auto_clean=1">⚡ Auto Clean Expired Online</a>
+<a class="btn b" href="smart_vouchers.php">Smart Vouchers</a>
+<a class="btn b" href="pppoe.php">PPPoE</a>
+</div>
+
+<form class="filters" method="get">
+<input name="search" value="<?=h($search)?>" placeholder="Search client, IP, source...">
+<select name="source">
+<option value="all" <?=$sourceFilter==="all"?"selected":""?>>All Categories</option>
+<option value="voucher" <?=$sourceFilter==="voucher"?"selected":""?>>Voucher</option>
+<option value="stk" <?=$sourceFilter==="stk"?"selected":""?>>STK</option>
+<option value="pppoe" <?=$sourceFilter==="pppoe"?"selected":""?>>PPPoE</option>
+</select>
+<select name="limit">
+<option value="10" <?=$limit==="10"?"selected":""?>>Show 10</option>
+<option value="20" <?=$limit==="20"?"selected":""?>>Show 20</option>
+<option value="all" <?=$limit==="all"?"selected":""?>>Show All</option>
+</select>
+<button class="btn g">Filter</button>
+</form>
+
+<div class="box">
+<h2>All Clients: Voucher, STK & PPPoE</h2>
+<table>
+<tr><th>Category</th><th>Client</th><th>Status</th><th>Online</th><th>IP</th><th>Used</th><th>Expires</th><th>Remaining</th><th>Actions</th></tr>
+<?php foreach($items as $x): ?>
+<tr>
+<td><?=strtoupper(h($x["source"]))?></td>
+<td><b style="color:#5eead4"><?=h($x["client"])?></b></td>
+<td><span class="pill <?=$x["status"]==="expired"?"ex":"ok"?>"><?=strtoupper(h($x["status"]))?></span></td>
+<td><span class="pill <?=$x["online"]?"on":"off"?>"><?=$x["online"]?"ONLINE":"OFFLINE"?></span></td>
+<td><?=h($x["ip"] ?: "-")?></td>
+<td><?=h($x["used"])?></td>
+<td><?=h($x["expires"])?></td>
+<td><?=h($x["remaining"])?></td>
+<td>
+<a class="btn b" href="?search=<?=urlencode($x["client"])?>">View</a>
+<form method="post" style="display:inline"><input type="hidden" name="source" value="<?=h($x["source"])?>"><input type="hidden" name="id" value="<?=h($x["id"])?>"><input type="hidden" name="action" value="disconnect"><button class="btn o">Disconnect</button></form>
+<form method="post" style="display:inline"><input type="hidden" name="source" value="<?=h($x["source"])?>"><input type="hidden" name="id" value="<?=h($x["id"])?>"><input type="hidden" name="action" value="clean"><button class="btn gray">Clean</button></form>
+<form method="post" style="display:inline"><input type="hidden" name="source" value="<?=h($x["source"])?>"><input type="hidden" name="id" value="<?=h($x["id"])?>"><input type="hidden" name="action" value="extend"><input type="number" name="hours" value="1" min="1"><button class="btn g">Extend</button></form>
+<form method="post" style="display:inline" onsubmit="return confirm('Delete this client/record?')"><input type="hidden" name="source" value="<?=h($x["source"])?>"><input type="hidden" name="id" value="<?=h($x["id"])?>"><input type="hidden" name="action" value="delete"><button class="btn r">Delete</button></form>
+</td>
+</tr>
+<?php endforeach; ?>
+</table>
+</div>
+</div>
+</body>
+</html>

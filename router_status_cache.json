@@ -3,9 +3,9 @@
     "online": true,
     "identity": "MikroTik",
     "host": "192.168.88.1",
-    "last_success": 1779451617,
-    "last_check": 1779451617,
+    "last_success": 1779627360,
+    "last_check": 1779627360,
     "fail_count": 0,
     "message": "Connected",
-    "time": "2026-05-22 15:06:57"
+    "time": "2026-05-24 15:56:01"
 }

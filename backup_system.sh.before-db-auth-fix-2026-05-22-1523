@@ -1,0 +1,25 @@
+#!/bin/bash
+
+DATE=$(date +"%Y-%m-%d_%H-%M-%S")
+
+BASE="/var/www/html/mhakim-billing-system"
+BACKUP_DB="$BASE/backups/database"
+BACKUP_SYS="$BASE/backups/system"
+BACKUP_LOG="$BASE/backups/logs/backup.log"
+
+echo "[$DATE] Backup started" >> $BACKUP_LOG
+
+# DATABASE BACKUP
+mysqldump mhakim_billing > "$BACKUP_DB/db_$DATE.sql"
+
+# SYSTEM FILES BACKUP
+tar -czf "$BACKUP_SYS/system_$DATE.tar.gz" \
+    --exclude="$BASE/backups" \
+    --exclude="$BASE/vendor" \
+    $BASE
+
+# DELETE OLD BACKUPS (older than 7 days)
+find "$BACKUP_DB" -type f -mtime +7 -delete
+find "$BACKUP_SYS" -type f -mtime +7 -delete
+
+echo "[$DATE] Backup completed" >> $BACKUP_LOG
